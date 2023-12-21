@@ -10,9 +10,10 @@ all: install format
 install:
 	mamba env update --prune -p ${ENV_FOLDER} -f environment.yml
 	$(CONDA_ACTIVATE) ${ENV_FOLDER}
-	pip install git+https://github.com/babelomics/ivae_scorer@main
+	pip install git+https://github.com/babelomics/ivae_scorer@develop
+	pip install -e .
 format:
 	$(CONDA_ACTIVATE) ${ENV_FOLDER}
-	autoflake -r --in-place --remove-unused-variables --remove-all-unused-imports src
-	isort --profile black src notebooks
-	black src notebooks
+	autoflake -r --in-place --remove-unused-variables --remove-all-unused-imports isrobust
+	isort --profile black isrobust notebooks
+	black isrobust notebooks
