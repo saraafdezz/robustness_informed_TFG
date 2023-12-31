@@ -16,17 +16,25 @@ install:
 format:
 	$(CONDA_ACTIVATE) ${ENV_FOLDER}
 	autoflake -r --in-place --remove-unused-variables --remove-all-unused-imports isrobust
+	autoflake -r --in-place --remove-unused-variables --remove-all-unused-imports notebooks
 	nbqa autoflake -r --in-place --remove-unused-variables --remove-all-unused-imports notebooks
 	nbqa isort --profile black isrobust notebooks
+	isort --profile black isrobust notebooks
 	black isrobust notebooks
 run-kegg: install format
 	$(CONDA_ACTIVATE) ${ENV_FOLDER}
-	mkdir -p results/logs/
-	papermill notebooks/00-compute_scores.ipynb -p debug False -p model_kind ivae_kegg  > results/logs/ivae_kegg.out 2> results/logs/ivae_kegg.err
+	rm -rf results/ivae_kegg
+	mkdir -p results/ivae_kegg/logs/
+	seq 0 99 | parallel -j${N_GPU} CUDA_VISIBLE_DEVICES='$$(({%} - 1))' \
+		python notebooks/00-train.py ivae_kegg 0 {} \
+		">" results/ivae_kegg/logs/train_seed-{}.out "2>" results/ivae_kegg/logs/train_seed-{}.err
 run-reactome: install format
 	$(CONDA_ACTIVATE) ${ENV_FOLDER}
-	mkdir -p results/logs/
-	papermill notebooks/00-compute_scores.ipynb -p debug False -p model_kind ivae_reactome  > results/logs/ivae_reactome.out 2> results/logs/ivae_reactome.err
+	rm -rf results/ivae_reactome
+	mkdir -p results/ivae_reactome/logs
+	seq 0 99 | parallel -j${N_GPU} CUDA_VISIBLE_DEVICES='$$(({%} - 1))' \
+		python notebooks/00-train.py ivae_reactome 0 {} \
+		">" results/ivae_reactome/logs/train_seed-{}.out "2>" results/ivae_reactome/logs/train_seed-{}.err
 run-analyze: run-kegg run-reactome
 	$(CONDA_ACTIVATE) ${ENV_FOLDER}
 	papermill 01-analyze_results.ipynb > results/logs/01-analyze_results.out 2> results/logs/01-analyze_results.err
