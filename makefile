@@ -8,7 +8,8 @@ CONDA_ACTIVATE = source $$(conda info --base)/etc/profile.d/conda.sh ; conda act
 
 all: install format run-kegg run-reactome run-analyze
 install:
-	mamba env update --prune -p ${ENV_FOLDER} -f environment.yml
+	rm -rf ${ENV_FOLDER}
+	mamba env create -p ${ENV_FOLDER} -f environment.yml
 	$(CONDA_ACTIVATE) ${ENV_FOLDER}
 	pip install git+https://github.com/babelomics/ivae_scorer@develop
 	pip install -e .
