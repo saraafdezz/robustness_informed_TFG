@@ -1,0 +1,15 @@
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - jupyterlab
+  - autoflake
+  - black
+  - black-jupyter
+  - python-dotenv
+  - isort
+  - pylint
+  - python=3.10
+  - pip:
+    - binn==0.0.3
+  
