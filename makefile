@@ -29,32 +29,34 @@ format:
 	nbqa isort --profile black isrobust notebooks
 	isort --profile black isrobust notebooks
 	black isrobust notebooks
-run-kegg: install-ivae format
+run-kegg: 
 	$(CONDA_ACTIVATE) ${IVAE_ENV_FOLDER}
 	rm -rf results/ivae_kegg
 	mkdir -p results/ivae_kegg/logs/
-	$(SEEDS) | parallel -j${N_GPU} CUDA_VISIBLE_DEVICES='$$(({%} - 1))' \
-		python notebooks/00-train.py ivae_kegg 0 {} \
+	parallel -j${N_GPU} CUDA_VISIBLE_DEVICES='$$(({%} - 1))' \
+		python notebooks/00-train.py ivae_kegg ${DEBUG} {} \
 		">" results/ivae_kegg/logs/train_seed-{}.out \
-		"2>" results/ivae_kegg/logs/train_seed-{}.err
+		"2>" results/ivae_kegg/logs/train_seed-{}.err \
+		::: $(SEEDS)
 run-reactome: install-ivae format
 	$(CONDA_ACTIVATE) ${IVAE_ENV_FOLDER}
 	rm -rf results/ivae_reactome
 	mkdir -p results/ivae_reactome/logs
-	$(SEEDS) | nohup parallel -j${N_GPU} CUDA_VISIBLE_DEVICES='$$(({%} - 1))' \${}
-		python notebooks/00-train.py ivae_reactome 0 {} \
+	parallel -j${N_GPU} CUDA_VISIBLE_DEVICES='$$(({%} - 1))' \
+		python notebooks/00-train.py ivae_reactome ${DEBUG} {} \
 		">" results/ivae_reactome/logs/train_seed-{}.out \
-		"2>" results/ivae_reactome/logs/train_seed-{}.err &
+		"2>" results/ivae_reactome/logs/train_seed-{}.err \
+		::: $(SEEDS)
 run-random: install-ivae format
 	$(CONDA_ACTIVATE) ${IVAE_ENV_FOLDER}
 	rm -rf $$(printf "results/ivae_random-%s " $(FRACS))
 	mkdir -p $$(printf "results/ivae_random-%s/logs " $(FRACS))
 
-	nohup parallel -j${N_GPU} CUDA_VISIBLE_DEVICES='$$(({%} - 1))' \
-		python notebooks/00-train.py ivae_random-{2} 0 {2} {1} \
+	parallel -j${N_GPU} CUDA_VISIBLE_DEVICES='$$(({%} - 1))' \
+		python notebooks/00-train.py ivae_random-{2} ${DEBUG} {2} {1} \
 		">" results/ivae_random-{2}/logs/train_seed-{1}.out \
 		"2>" results/ivae_random-{2}/logs/train_seed-{1}.err \
-		::: $(SEEDS) ::: $(FRACS) &
+		::: $(SEEDS) ::: $(FRACS)
 run-scoring: run-kegg run-reactome run-random
 	$(CONDA_ACTIVATE) ${IVAE_ENV_FOLDER}
 	papermill notebooks/01-compute_scores.ipynb -p model_kind ivae_scorer -p debug False \
