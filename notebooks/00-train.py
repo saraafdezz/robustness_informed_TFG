@@ -21,18 +21,28 @@ from ivae_scorer.bio import (
     sync_gexp_adj,
 )
 from ivae_scorer.datasets import load_kang
+from ivae_scorer.models import build_kegg_vae, build_reactome_vae
 from ivae_scorer.utils import set_all_seeds
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import minmax_scale
 from tensorflow.keras import callbacks
 from tensorflow.keras.models import Model
 
-_, model_kind, debug, seed = sys.argv
+args = sys.argv
+
+if len(args) == 5:
+    model_kind, debug, frac, seed = args[1:]
+    frac = float(frac)
+    print(frac)
+else:
+    model_kind, debug, seed = args[1:]
+    frac = 1
 
 model_kind = str(model_kind)
 debug = bool(int(debug))
 seed = int(seed)
 
+print(model_kind, debug, seed)
 
 project_path = Path(dotenv.find_dotenv()).parent
 results_path = project_path.joinpath("results")
@@ -55,14 +65,14 @@ sc.logging.print_header()
 # %%
 if debug:
     N_EPOCHS = 2
-    N_ITERS = 10
 else:
     N_EPOCHS = 300
-    N_ITERS = 100
 
 if model_kind == "ivae_kegg":
     n_encoding_layers = 3
 elif model_kind == "ivae_reactome":
+    n_encoding_layers = 2
+elif "ivae_random" in model_kind:
     n_encoding_layers = 2
 else:
     raise NotImplementedError(f"{model_kind} not implemented yet.")
@@ -70,7 +80,11 @@ else:
 print(f"{debug=} {model_kind=}")
 
 # %%
-adata = load_kang(data_folder=data_path, normalize=True, n_genes=4000)
+if "ivae_random" in model_kind:
+    n_genes = 3000
+else:
+    n_genes = None
+adata = load_kang(data_folder=data_path, normalize=True, n_genes=n_genes)
 
 # %%
 x_trans = adata.to_df()
@@ -93,13 +107,25 @@ reactome = get_reactome_adj()
 reactome_pathway_names = reactome.columns
 
 # %%
+random_layer = np.random.binomial(1, frac, size=reactome.size)
+random_layer = random_layer.reshape(reactome.shape)
+random_layer_names = [f"rand-{icol:02d}" for icol in range(random_layer.shape[1])]
+random_layer = pd.DataFrame(
+    random_layer, index=reactome.index, columns=random_layer_names
+)
+random_layer = random_layer.loc[random_layer.any(axis=1), :]
+random_layer = random_layer.loc[:, random_layer.any(axis=0)]
+random_layer_names = random_layer.columns
+
+# %%
 if model_kind == "ivae_kegg":
     x_trans, circuit_adj = sync_gexp_adj(gexp=x_trans, adj=circuit_adj)
 elif model_kind == "ivae_reactome":
     x_trans, reactome = sync_gexp_adj(x_trans, reactome)
+elif "ivae_random" in model_kind:
+    x_trans, random_layer = sync_gexp_adj(x_trans, random_layer)
 
 # %%
-from ivae_scorer.models import build_kegg_vae, build_reactome_vae
 
 
 def get_importances(data, abs=False):
@@ -160,6 +186,8 @@ if model_kind == "ivae_kegg":
     )
 elif model_kind == "ivae_reactome":
     vae, encoder, decoder = build_reactome_vae(reactome, seed=seed)
+elif "ivae_random" in model_kind:
+    vae, encoder, decoder = build_reactome_vae(random_layer, seed=seed)
 else:
     raise NotImplementedError("Model not yet implemented.")
 
@@ -224,6 +252,16 @@ for layer_id in range(1, len(layer_outputs)):
             layer_name = "pathways"
         elif layer_id == (len(layer_outputs) - 1):
             n_latents = len(reactome_pathway_names) // 2
+            colnames = [f"latent_{i:02d}" for i in range(n_latents)]
+            layer_name == "funnel"
+        else:
+            continue
+    elif "ivae_random" in model_kind:
+        if layer_id == 1:
+            colnames = random_layer_names
+            layer_name = "pathways"
+        elif layer_id == (len(layer_outputs) - 1):
+            n_latents = len(random_layer_names) // 2
             colnames = [f"latent_{i:02d}" for i in range(n_latents)]
             layer_name == "funnel"
         else:
