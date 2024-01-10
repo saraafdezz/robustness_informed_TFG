@@ -3,6 +3,7 @@ import random
 from pathlib import Path
 
 import numpy as np
+import tensorflow as tf
 
 
 def get_resource_path(fname):
@@ -22,3 +23,4 @@ def get_resource_path(fname):
 def set_all_seeds(seed):
     random.seed(seed)
     np.random.seed(seed)
+    tf.random.set_seed(seed)

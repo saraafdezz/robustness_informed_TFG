@@ -1,6 +1,7 @@
 from itertools import chain, repeat
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 
 from isrobust.utils import get_resource_path
@@ -96,6 +97,19 @@ def get_adj_matrices(gene_list=None):
     circuit_to_pathway = build_circuit_pathway_adj(circuit_adj, pathway_adj)
 
     return circuit_adj, circuit_to_pathway
+
+
+def get_random_adj(frac, shape, size, seed, index):
+    np.random.RandomState(seed)
+    random_layer = np.random.binomial(1, frac, size=size)
+    random_layer = random_layer.reshape(shape)
+    random_layer_names = [f"rand-{icol:02d}" for icol in range(random_layer.shape[1])]
+    random_layer = pd.DataFrame(random_layer, index=index, columns=random_layer_names)
+    random_layer = random_layer.loc[random_layer.any(axis=1), :]
+    random_layer = random_layer.loc[:, random_layer.any(axis=0)]
+    random_layer_names = random_layer.columns
+
+    return random_layer, random_layer_names
 
 
 def build_hipathia_renamers():

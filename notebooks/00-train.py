@@ -14,19 +14,21 @@ import numpy as np
 import pandas as pd
 import scanpy as sc
 import tensorflow as tf
-from ivae_scorer.bio import (
-    build_hipathia_renamers,
-    get_adj_matrices,
-    get_reactome_adj,
-    sync_gexp_adj,
-)
-from ivae_scorer.datasets import load_kang
 from ivae_scorer.models import build_kegg_vae, build_reactome_vae
-from ivae_scorer.utils import set_all_seeds
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import minmax_scale
 from tensorflow.keras import callbacks
 from tensorflow.keras.models import Model
+
+from isrobust.bio import (
+    build_hipathia_renamers,
+    get_adj_matrices,
+    get_random_adj,
+    get_reactome_adj,
+    sync_gexp_adj,
+)
+from isrobust.datasets import load_kang
+from isrobust.utils import set_all_seeds
 
 args = sys.argv
 
@@ -107,15 +109,13 @@ reactome = get_reactome_adj()
 reactome_pathway_names = reactome.columns
 
 # %%
-random_layer = np.random.binomial(1, frac, size=reactome.size)
-random_layer = random_layer.reshape(reactome.shape)
-random_layer_names = [f"rand-{icol:02d}" for icol in range(random_layer.shape[1])]
-random_layer = pd.DataFrame(
-    random_layer, index=reactome.index, columns=random_layer_names
+state = np.random.get_state()
+
+random_layer, random_layer_names = get_random_adj(
+    frac, shape=reactome.shape, size=reactome.size, index=reactome.index, seed=42
 )
-random_layer = random_layer.loc[random_layer.any(axis=1), :]
-random_layer = random_layer.loc[:, random_layer.any(axis=0)]
-random_layer_names = random_layer.columns
+
+np.random.set_state(state)
 
 # %%
 if model_kind == "ivae_kegg":
