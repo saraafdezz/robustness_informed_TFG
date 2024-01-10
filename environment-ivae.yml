@@ -24,3 +24,6 @@ dependencies:
   - graphviz
   - nbqa
   - scikit-misc
+  - pip:
+    - git+https://github.com/babelomics/ivae_scorer@develop
+    - -e .
