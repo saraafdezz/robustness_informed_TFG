@@ -5,9 +5,9 @@ include .env
 
 SHELL := /bin/bash
 CONDA_ACTIVATE = source $$(conda info --base)/etc/profile.d/conda.sh ; conda activate
-FRACS=$$(seq ${FRAC_START} ${FRAC_STEP} ${FRAC_STOP})
-SEEDS=$$(seq ${SEED_START} ${SEED_STEP} ${SEED_STOP})
 IVAE_PYTHON=${IVAE_ENV_FOLDER}/bin/python
+FRACS=$$(LANG=en_US seq ${FRAC_START} ${FRAC_STEP} ${FRAC_STOP})
+SEEDS=$$(LANG=en_US seq ${SEED_START} ${SEED_STEP} ${SEED_STOP})
 
 all: install-ivae format run-kegg .WAIT run-reactome .WAIT run-random run-scoring
 install-ivae: $(IVAE_PYTHON)
