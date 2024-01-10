@@ -10,6 +10,7 @@ FRACS=$$(LANG=en_US seq ${FRAC_START} ${FRAC_STEP} ${FRAC_STOP})
 SEEDS=$$(LANG=en_US seq ${SEED_START} ${SEED_STEP} ${SEED_STOP})
 
 all: install-ivae format run-kegg .WAIT run-reactome .WAIT run-random run-scoring
+
 install-ivae: $(IVAE_PYTHON)
 $(IVAE_PYTHON): environment-ivae.yml
 	rm -rf ${IVAE_ENV_FOLDER}
@@ -20,7 +21,8 @@ $(IVAE_PYTHON): environment-ivae.yml
 # 	$(CONDA_ACTIVATE) ${BINN_ENV_FOLDER}
 # 	pip install mygene binn==0.0.3 --extra-index-url https://download.pytorch.org/whl/cu118
 # 	pip install -e .
-format:
+
+format: install-ivae
 	$(CONDA_ACTIVATE) ${IVAE_ENV_FOLDER}
 	autoflake -r --in-place --remove-unused-variables --remove-all-unused-imports isrobust
 	autoflake -r --in-place --remove-unused-variables --remove-all-unused-imports notebooks
@@ -28,7 +30,8 @@ format:
 	nbqa isort --profile black isrobust notebooks
 	isort --profile black isrobust notebooks
 	black isrobust notebooks
-run-kegg:
+
+run-kegg: install-ivae format
 	$(CONDA_ACTIVATE) ${IVAE_ENV_FOLDER}
 	rm -rf results/ivae_kegg
 	mkdir -p results/ivae_kegg/logs/
@@ -36,9 +39,9 @@ run-kegg:
 		python notebooks/00-train.py ivae_kegg ${DEBUG} {} \
 		">" results/ivae_kegg/logs/train_seed-{}.out \
 		"2>" results/ivae_kegg/logs/train_seed-{}.err \
-		::: $(SEEDS) \
-		&
-run-reactome:
+		::: $(SEEDS)
+
+run-reactome: install-ivae format
 	$(CONDA_ACTIVATE) ${IVAE_ENV_FOLDER}
 	rm -rf results/ivae_reactome
 	mkdir -p results/ivae_reactome/logs
@@ -46,9 +49,9 @@ run-reactome:
 		python notebooks/00-train.py ivae_reactome ${DEBUG} {} \
 		">" results/ivae_reactome/logs/train_seed-{}.out \
 		"2>" results/ivae_reactome/logs/train_seed-{}.err \
-		::: $(SEEDS) \
-		&
-run-random:
+		::: $(SEEDS)
+
+run-random: install-ivae format
 	$(CONDA_ACTIVATE) ${IVAE_ENV_FOLDER}
 	rm -rf $$(printf "results/ivae_random-%s " $(FRACS))
 	mkdir -p $$(printf "results/ivae_random-%s/logs " $(FRACS))
@@ -59,6 +62,7 @@ run-random:
 		"2>" results/ivae_random-{2}/logs/train_seed-{1}.err \
 		::: $(SEEDS) \
 		::: $(FRACS)
+
 run-scoring: run-kegg run-reactome run-random
 	$(CONDA_ACTIVATE) ${IVAE_ENV_FOLDER}
 	papermill notebooks/01-compute_scores.ipynb \
