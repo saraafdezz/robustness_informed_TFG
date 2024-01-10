@@ -24,5 +24,7 @@ DEBUG=0
 
 It was run using:
 ```
-nohup make &
+screen -dmS ivae
+make
+(reattach)
 ```
