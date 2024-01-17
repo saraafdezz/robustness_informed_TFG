@@ -85,7 +85,7 @@ print(f"{debug=} {model_kind=}")
 if "ivae_random" in model_kind:
     n_genes = 3000
 else:
-    n_genes = None
+    n_genes = 3000
 adata = load_kang(data_folder=data_path, normalize=True, n_genes=n_genes)
 
 # %%
