@@ -1,6 +1,6 @@
 #!make
 include .env
-.PHONY: install-ivae format run-kegg run-reactome run-random run-scoring
+.PHONY: install-ivae format run-kegg run-reactome run-random run-scoring-kegg run-scoring-reactome run-scoring-random
 .ONESHELL:
 
 SHELL := /bin/bash
@@ -9,7 +9,7 @@ IVAE_PYTHON=${IVAE_ENV_FOLDER}/bin/python
 FRACS=$$(LANG=en_US seq ${FRAC_START} ${FRAC_STEP} ${FRAC_STOP})
 SEEDS=$$(LANG=en_US seq ${SEED_START} ${SEED_STEP} ${SEED_STOP})
 
-all: install-ivae format run-kegg .WAIT run-reactome .WAIT run-random run-scoring
+all: install-ivae format run-kegg .WAIT run-reactome .WAIT run-random .WAIT run-scoring-kegg .WAIT run-scoring-reactome .WAIT run-scoring-random
 
 install-ivae: $(IVAE_PYTHON)
 $(IVAE_PYTHON): environment-ivae.yml
@@ -63,19 +63,25 @@ run-random: install-ivae format
 		::: $(SEEDS) \
 		::: $(FRACS)
 
-run-scoring: run-kegg run-reactome run-random
+run-scoring-kegg: run-kegg
 	$(CONDA_ACTIVATE) ${IVAE_ENV_FOLDER}
 	
 	papermill notebooks/01-compute_scores.ipynb \
 		-p model_kind ivae_kegg -p debug 0 \
 		> results/ivae_kegg/logs/scoring.out \
 		2> results/ivae_kegg/logs/scoring.err
-	
+
+run-scoring-reactome: run-reactome
+	$(CONDA_ACTIVATE) ${IVAE_ENV_FOLDER}
+
 	papermill notebooks/01-compute_scores.ipynb \
 		-p model_kind ivae_reactome -p debug 0 \
 		> results/ivae_reactome/logs/scoring.out \
 		2> results/ivae_reactome/logs/scoring.err
 
+run-scoring-random: run-random
+	$(CONDA_ACTIVATE) ${IVAE_ENV_FOLDER}
+	
 	parallel -j${N_CPU} \
 		papermill \
 		-p model_kind ivae_random-{} -p debug 0 -p frac {} \
@@ -83,4 +89,3 @@ run-scoring: run-kegg run-reactome run-random
 		">" results/ivae_random-{}/logs/scoring.out \
 		"2>" results/ivae_random-{}/logs/scoring.err \
 		::: $(FRACS)
-
