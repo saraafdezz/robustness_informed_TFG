@@ -65,8 +65,9 @@ run-random: install-ivae format
 
 run-scoring: run-kegg run-reactome run-random
 	$(CONDA_ACTIVATE) ${IVAE_ENV_FOLDER}
+	
 	papermill notebooks/01-compute_scores.ipynb \
-		-p model_kind ivae_scorer -p debug 0 \
+		-p model_kind ivae_kegg -p debug 0 \
 		> results/ivae_kegg/logs/scoring.out \
 		2> results/ivae_kegg/logs/scoring.err
 	
@@ -76,7 +77,10 @@ run-scoring: run-kegg run-reactome run-random
 		2> results/ivae_reactome/logs/scoring.err
 
 	parallel -j${N_CPU} \
-		papermill notebooks/01-compute_scores.ipynb -p ivae_random-{} -p debug 0 -frac {}\
+		papermill \
+		-p model_kind ivae_random-{} -p debug 0 -p frac {} \
+		notebooks/01-compute_scores.ipynb - \
 		">" results/ivae_random-{}/logs/scoring.out \
 		"2>" results/ivae_random-{}/logs/scoring.err \
 		::: $(FRACS)
+
