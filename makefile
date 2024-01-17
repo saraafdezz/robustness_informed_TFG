@@ -8,11 +8,12 @@ CONDA_ACTIVATE = source $$(conda info --base)/etc/profile.d/conda.sh ; conda act
 IVAE_PYTHON=${IVAE_ENV_FOLDER}/bin/python
 FRACS=$$(LANG=en_US seq ${FRAC_START} ${FRAC_STEP} ${FRAC_STOP})
 SEEDS=$$(LANG=en_US seq ${SEED_START} ${SEED_STEP} ${SEED_STOP})
+PY_FILES := isrobust/*.py
 
 all: install-ivae format run-kegg .WAIT run-reactome .WAIT run-random .WAIT run-scoring-kegg .WAIT run-scoring-reactome .WAIT run-scoring-random
 
-install-ivae: $(IVAE_PYTHON)
-$(IVAE_PYTHON): environment-ivae.yml
+install-ivae: $(IVAE_PYTHON) 
+$(IVAE_PYTHON): environment-ivae.yml $(PY_FILES)
 	rm -rf ${IVAE_ENV_FOLDER}
 	mamba env create -p ${IVAE_ENV_FOLDER} -f environment-ivae.yml
 # install-binn:
