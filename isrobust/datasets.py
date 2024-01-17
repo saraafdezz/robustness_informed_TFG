@@ -1,3 +1,7 @@
+"""
+@author: Carlos Loucera
+"""
+
 from pathlib import Path
 
 import scanpy as sc

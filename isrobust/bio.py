@@ -1,3 +1,7 @@
+"""
+@author: Carlos Loucera
+"""
+
 from itertools import chain, repeat
 from pathlib import Path
 
