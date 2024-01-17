@@ -12,6 +12,7 @@ dependencies:
   - scipy=1.10.1
   - isort
   - pylint
+  - pip
   - numpy=1.23.5
   - scanpy=1.9.3
   - python=3.10
