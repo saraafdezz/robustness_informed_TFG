@@ -10,6 +10,6 @@ dependencies:
   - isort
   - pylint
   - python=3.10
-  - pip:
-    - binn==0.0.3
-  
+  - scanpy=1.9.3
+  - scikit-misc
+  - requests_cache
