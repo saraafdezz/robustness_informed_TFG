@@ -164,3 +164,7 @@ data/
 results/
 nohup.out
 notebooks/debug.ipynb
+
+# pixi environments
+.pixi
+*.egg-info
