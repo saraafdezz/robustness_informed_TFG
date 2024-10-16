@@ -14,16 +14,16 @@ import numpy as np
 import pandas as pd
 import scanpy as sc
 import tensorflow as tf
-from isrobust.bio import (
+from isrobust_TFM.bio import (
     build_hipathia_renamers,
     get_adj_matrices,
     get_random_adj,
     get_reactome_adj,
     sync_gexp_adj,
 )
-from isrobust.datasets import load_kang
-from isrobust.utils import set_all_seeds
-from ivae_scorer.models import build_kegg_vae, build_reactome_vae
+from isrobust_TFM.datasets import load_kang
+from isrobust_TFM.utils import set_all_seeds
+from isrobust_TFM.CI_VAE_CLASS import InformedVAE
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import minmax_scale
 from tensorflow.keras import callbacks
