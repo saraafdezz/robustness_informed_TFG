@@ -6,11 +6,11 @@ from keras import ops, regularizers
 from keras.layers import Dense, Input, Layer
 from keras.models import Model
 from keras.optimizers import Adam
-
+import tensorflow as tf
 from isrobust_TFM.layers import InformedConstraint,InformedBiasConstraint
 from isrobust_TFM.utils import set_all_seeds
 import tensorflow as tf
-import tensorflow.keras.backend as K
+import keras.backend as K
 class VAELoss(Layer):
     """
     Layer that adds VAE total loss to the model.
@@ -22,7 +22,7 @@ class VAELoss(Layer):
 
     def call(self, inputs):
         inputs, outputs, z_mean, z_log_sigma = inputs
-        reconstruction_loss =K.mean(K.square(inputs - outputs))
+        reconstruction_loss =tf.reduce_mean(tf.square(inputs - outputs))
         reconstruction_loss *= self.input_dim
         kl_loss = 1 + z_log_sigma - ops.square(z_mean) - ops.exp(z_log_sigma)
         kl_loss = ops.sum(kl_loss, axis=-1)
