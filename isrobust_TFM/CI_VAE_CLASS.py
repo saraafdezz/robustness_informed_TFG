@@ -113,3 +113,5 @@ class InformedVAE:
 
     def predict(self, *args, **kwargs):
         return self.vae.predict(*args, **kwargs)
+    def evaluate(self, *args, **kwargs):
+        return self.vae.evaluate(*args, **kwargs)
