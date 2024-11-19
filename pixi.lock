@@ -3866,10 +3866,10 @@ packages:
   size: 73783
   timestamp: 1702518633821
 - kind: pypi
-  name: isrobust
+  name: isrobust-tfm
   version: 1.0.0
   path: .
-  sha256: d5e493e5d4fafceee6af66bef1fa3c6a7b97fc2bae9bff22c729100c0ddd0f3b
+  sha256: ea3324de6d5473c457420149b51ea4b6efc65754f70347ac2be712447f59f82c
   editable: true
 - kind: conda
   name: jedi
