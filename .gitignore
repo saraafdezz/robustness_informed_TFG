@@ -168,4 +168,4 @@ notebooks/debug.ipynb
 # pixi environments
 .pixi
 *.egg-info
-notebooks/reactome.ipynb
+
