@@ -2,6 +2,7 @@ import keras
 import numpy as np
 import tensorflow as tf
 
+
 class InformedConstraint(keras.constraints.Constraint):
     def __init__(self, adj):
         self.adj = adj
@@ -12,17 +13,16 @@ class InformedConstraint(keras.constraints.Constraint):
     def get_config(self):
         return {"adj": self.adj.tolist()}
 
+
 class InformedBiasConstraint(keras.constraints.Constraint):
     def __init__(self, adj):
-        self.adj = 1*(np.sum(adj, axis=0) > 0)
+        self.adj = 1 * (np.sum(adj, axis=0) > 0)
 
     def __call__(self, w):
         return w * tf.constant(self.adj, dtype=w.dtype)
 
     def get_config(self):
         return {"adj": self.adj.tolist()}
-
-
 
 
 # class InformedInitializer(keras.initializers.Initializer):

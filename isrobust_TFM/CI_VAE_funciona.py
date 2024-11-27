@@ -1,16 +1,15 @@
 import os
-import numpy as np
+
 os.environ["KERAS_BACKEND"] = "tensorflow"
 import keras
+import tensorflow.keras.backend as K
 from keras import ops, regularizers
 from keras.layers import Dense, Input, Layer
 from keras.models import Model
 from keras.optimizers import Adam
 
-from isrobust_TFM.layers import InformedConstraint,InformedBiasConstraint
+from isrobust_TFM.layers import InformedBiasConstraint, InformedConstraint
 from isrobust_TFM.utils import set_all_seeds
-import tensorflow as tf
-import tensorflow.keras.backend as K
 
 
 class Sampling(Layer):
@@ -26,7 +25,9 @@ class Sampling(Layer):
         z_mean, z_log_var = inputs
         batch = ops.shape(z_mean)[0]
         dim = ops.shape(z_mean)[1]
-        epsilon = keras.random.normal(shape=(batch, dim), mean=0.0, stddev=0.1)#, seed=self.seed_generator
+        epsilon = keras.random.normal(
+            shape=(batch, dim), mean=0.0, stddev=0.1
+        )  # , seed=self.seed_generator
         return z_mean + ops.exp(0.5 * z_log_var) * epsilon
 
 
@@ -41,7 +42,7 @@ class VAE_Loss(Layer):
 
     def call(self, inputs):
         inputs, outputs, z_mean, z_log_sigma = inputs
-        reconstruction_loss =K.mean(K.square(inputs - outputs))
+        reconstruction_loss = K.mean(K.square(inputs - outputs))
         reconstruction_loss *= self.input_dim
         kl_loss = 1 + z_log_sigma - ops.square(z_mean) - ops.exp(z_log_sigma)
         kl_loss = ops.sum(kl_loss, axis=-1)
@@ -62,31 +63,30 @@ def build_kegg_layers(circuits, pathways, act="tanh"):
     Returns:
        layers: layers of biologist prior choosen
     """
-    
-    layers = []
-    if (circuits is not None):# and (circuits.shape[1] > 0):
-            circuit_layer = Dense(
-                circuits.shape[1],
-                activation=act,
-                activity_regularizer=regularizers.L2(1e-5),
-                kernel_constraint=InformedConstraint(circuits),
-                bias_constraint=InformedBiasConstraint(circuits),
-                name="circuits",
-            )
-            layers.append(circuit_layer)
-            #
-    if (pathways is not None):# and (pathways.shape[1] > 0):
-            pathway_layer = Dense(
-                pathways.shape[1],
-                activation=act,
-                activity_regularizer=regularizers.L2(1e-5),
-                kernel_constraint=InformedConstraint(pathways),
-                bias_constraint=InformedBiasConstraint(pathways),
-                name="pathways",
-            )
-            layers.append(pathway_layer)
-    return layers
 
+    layers = []
+    if circuits is not None:  # and (circuits.shape[1] > 0):
+        circuit_layer = Dense(
+            circuits.shape[1],
+            activation=act,
+            activity_regularizer=regularizers.L2(1e-5),
+            kernel_constraint=InformedConstraint(circuits),
+            bias_constraint=InformedBiasConstraint(circuits),
+            name="circuits",
+        )
+        layers.append(circuit_layer)
+        #
+    if pathways is not None:  # and (pathways.shape[1] > 0):
+        pathway_layer = Dense(
+            pathways.shape[1],
+            activation=act,
+            activity_regularizer=regularizers.L2(1e-5),
+            kernel_constraint=InformedConstraint(pathways),
+            bias_constraint=InformedBiasConstraint(pathways),
+            name="pathways",
+        )
+        layers.append(pathway_layer)
+    return layers
 
 
 def build_reactome_layers(adj, act="tanh"):
@@ -101,7 +101,7 @@ def build_reactome_layers(adj, act="tanh"):
     Returns:
        layers: layers of biologist prior choosen
     """
-    if (adj is not None): #and (adj.shape[1] > 0):
+    if adj is not None:  # and (adj.shape[1] > 0):
         return [
             Dense(
                 adj.shape[1],
@@ -151,12 +151,11 @@ def build_vae(layers, seed, learning_rate):
     """
     set_all_seeds(seed)
 
-    #if not layers:
-     #   raise ValueError("The layers list cannot be empty.")
+    # if not layers:
+    #   raise ValueError("The layers list cannot be empty.")
 
     latent_dim = layers[-1].kernel_constraint.adj.shape[1] // 2
     input_dim = layers[0].kernel_constraint.adj.shape[0]
-   
 
     inputs = Input(shape=(input_dim,))
 
@@ -200,5 +199,3 @@ def build_vae(layers, seed, learning_rate):
     vae.compile(optimizer=Adam(learning_rate=learning_rate), metrics=["mse"])
 
     return vae, encoder, decoder
-
-
