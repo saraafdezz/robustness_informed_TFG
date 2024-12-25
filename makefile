@@ -22,7 +22,7 @@ run-kegg: install-ivae format
 		">" ${RESULTS_FOLDER}/ivae_kegg/logs/train_seed-{}.out \
 		"2>" ${RESULTS_FOLDER}/ivae_kegg/logs/train_seed-{}.err \
 		::: $(SEEDS)
-
+        
 run-reactome: install-ivae format
 	rm -rf ${RESULTS_FOLDER}/ivae_reactome
 	mkdir -p ${RESULTS_FOLDER}/ivae_reactome/logs
@@ -42,15 +42,15 @@ run-random: install-ivae format
 		::: $(SEEDS) \
 		::: $(FRACS)
 
-run-scoring-kegg: run-kegg
 
+
+run-scoring-kegg: run-kegg
 	pixi run --environment cuda papermill notebooks/01-compute_scores.ipynb - \
 		-p model_kind ivae_kegg \
 		> ${RESULTS_FOLDER}/ivae_kegg/logs/scoring.out \
 		2> ${RESULTS_FOLDER}/ivae_kegg/logs/scoring.err
-
+        
 run-scoring-reactome: run-reactome
-
 	pixi run --environment cuda papermill notebooks/01-compute_scores.ipynb - \
 		-p model_kind ivae_reactome \
 		> ${RESULTS_FOLDER}/ivae_reactome/logs/scoring.out \
@@ -63,3 +63,5 @@ run-scoring-random:
 		">" ${RESULTS_FOLDER}/ivae_random-{}/logs/scoring.out \
 		"2>" ${RESULTS_FOLDER}/ivae_random-{}/logs/scoring.err \
 		::: $(FRACS)
+                       
+
