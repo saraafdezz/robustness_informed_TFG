@@ -141,7 +141,7 @@ print(f"{model_kind}")
 if debug:
     N_EPOCHS = 2
 else:
-    N_EPOCHS = 300
+    N_EPOCHS = 100
 
 if model_kind == "ivae_kegg":
     n_encoding_layers = 3
@@ -156,9 +156,9 @@ print(f"{debug=} {model_kind=}")
 
 # %%
 if "ivae_random" in model_kind:
-    n_genes = 3000
+    n_genes = None
 else:
-    n_genes = 3000
+    n_genes = None
 adata = load_kang(data_folder=data_path, normalize=True, n_genes=n_genes)
 
 # %%
