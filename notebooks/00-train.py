@@ -114,7 +114,7 @@ print(project_path)
 data_path = project_path.joinpath("data")
 data_path.mkdir(exist_ok=True, parents=True)
 
-set_all_seeds(seed=42)
+set_all_seeds(seed=seed)
 
 tf.config.experimental.enable_op_determinism()
 
@@ -185,7 +185,7 @@ reactome_pathway_names = reactome.columns
 state = np.random.get_state()
 
 random_layer, random_layer_names = get_random_adj(
-    frac, shape=reactome.shape, size=reactome.size, index=reactome.index, seed=42
+    frac, shape=reactome.shape, size=reactome.size, index=reactome.index, seed=seed
 )
 
 np.random.set_state(state)
@@ -213,7 +213,7 @@ x_train, x_val, x_test = train_val_test_split(
     val_size=0.20,
     test_size=0.20,
     stratify=obs["cell_type"].astype(str) + obs["condition"].astype(str),
-    seed=42,
+    seed=seed,
 )
 
 if model_kind == "ivae_kegg":
