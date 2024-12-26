@@ -221,14 +221,14 @@ if model_kind == "ivae_kegg":
 #         circuits=circuit_adj, pathways=circuit_to_pathway_adj, seed=seed
 #     )
      vae = InformedVAE(adjacency_matrices=[circuit_adj,circuit_to_pathway_adj],adjacency_names=["circuit_adj","circuit_to_pathway_adj"]
-                        ,adjacency_activation=["tanh","tanh"])
+                        ,adjacency_activation=["tanh","tanh"],seed=seed)
     
 elif model_kind == "ivae_reactome":
 #     vae, encoder, decoder = build_reactome_vae(reactome, seed=seed)
-     vae = InformedVAE(adjacency_matrices=reactome,adjacency_names="reactome",adjacency_activation="tanh")
+     vae = InformedVAE(adjacency_matrices=reactome,adjacency_names="reactome",adjacency_activation="tanh",seed=seed)
 elif "ivae_random" in model_kind:
 #     vae, encoder, decoder = build_reactome_vae(random_layer, seed=seed)
-     vae = InformedVAE(adjacency_matrices=random_layer,adjacency_names="random",adjacency_activation="tanh")
+     vae = InformedVAE(adjacency_matrices=random_layer,adjacency_names="random",adjacency_activation="tanh",seed=seed)
 else:
     raise NotImplementedError("Model not yet implemented.")
 
