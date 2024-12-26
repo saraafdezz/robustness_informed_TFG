@@ -57,8 +57,9 @@ class InformedVAE:
         adjacency_matrices,
         adjacency_names,
         adjacency_activation,
+        seed,
         learning_rate=1e-5,
-        seed=42,
+        
     ):
         self.adjacency_matrices = (
             adjacency_matrices
