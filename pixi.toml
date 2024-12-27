@@ -38,8 +38,6 @@ tensorflow = "*"
 [pypi-dependencies]
 isrobust_TFM = {path = ".", editable = true}
 
-[system-requirements]
-linux = "4"
 
 [feature.cuda]
 system-requirements = {cuda = "12"}
