@@ -38,6 +38,11 @@ import numpy as np
 import pandas as pd
 import scanpy as sc
 import tensorflow as tf
+from keras import callbacks
+from keras.models import Model
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import minmax_scale
+
 from isrobust_TFM.bio import (
     build_hipathia_renamers,
     get_adj_matrices,
@@ -45,15 +50,10 @@ from isrobust_TFM.bio import (
     get_reactome_adj,
     sync_gexp_adj,
 )
-
-
+from isrobust_TFM.CI_VAE_CLASS import InformedVAE
 from isrobust_TFM.datasets import load_kang
 from isrobust_TFM.utils import set_all_seeds
-from isrobust_TFM.CI_VAE_CLASS import InformedVAE
-from sklearn.model_selection import train_test_split
-from sklearn.preprocessing import minmax_scale
-from keras import callbacks
-from keras.models import Model
+
 
 def get_importances(data, abs=False):
     if abs:
@@ -129,6 +129,7 @@ debug = bool(int(config["DEBUG"]))
 # debug= bool(int(debug))
 
 results_path = Path(config["RESULTS_FOLDER"])
+print("RESULTS_FOLDER")
 results_path.mkdir(exist_ok=True, parents=True)
 figs_path = results_path.joinpath("figs")
 figs_path.mkdir(exist_ok=True, parents=True)
@@ -198,7 +199,7 @@ elif model_kind == "ivae_reactome":
 elif "ivae_random" in model_kind:
     x_trans, random_layer = sync_gexp_adj(x_trans, random_layer)
 
-    
+
 # print(circuit_adj)
 # print(circuit_to_pathway_adj)
 # %%
@@ -217,18 +218,32 @@ x_train, x_val, x_test = train_val_test_split(
 )
 
 if model_kind == "ivae_kegg":
-#     vae, encoder, decoder = build_kegg_vae(
-#         circuits=circuit_adj, pathways=circuit_to_pathway_adj, seed=seed
-#     )
-     vae = InformedVAE(adjacency_matrices=[circuit_adj,circuit_to_pathway_adj],adjacency_names=["circuit_adj","circuit_to_pathway_adj"]
-                        ,adjacency_activation=["tanh","tanh"],seed=seed)
-    
+    #     vae, encoder, decoder = build_kegg_vae(
+    #         circuits=circuit_adj, pathways=circuit_to_pathway_adj, seed=seed
+    #     )
+    vae = InformedVAE(
+        adjacency_matrices=[circuit_adj, circuit_to_pathway_adj],
+        adjacency_names=["circuit_adj", "circuit_to_pathway_adj"],
+        adjacency_activation=["tanh", "tanh"],
+        seed=seed,
+    )
+
 elif model_kind == "ivae_reactome":
-#     vae, encoder, decoder = build_reactome_vae(reactome, seed=seed)
-     vae = InformedVAE(adjacency_matrices=reactome,adjacency_names="reactome",adjacency_activation="tanh",seed=seed)
+    #     vae, encoder, decoder = build_reactome_vae(reactome, seed=seed)
+    vae = InformedVAE(
+        adjacency_matrices=reactome,
+        adjacency_names="reactome",
+        adjacency_activation="tanh",
+        seed=seed,
+    )
 elif "ivae_random" in model_kind:
-#     vae, encoder, decoder = build_reactome_vae(random_layer, seed=seed)
-     vae = InformedVAE(adjacency_matrices=random_layer,adjacency_names="random",adjacency_activation="tanh",seed=seed)
+    #     vae, encoder, decoder = build_reactome_vae(random_layer, seed=seed)
+    vae = InformedVAE(
+        adjacency_matrices=random_layer,
+        adjacency_names="random",
+        adjacency_activation="tanh",
+        seed=seed,
+    )
 else:
     raise NotImplementedError("Model not yet implemented.")
 
@@ -258,9 +273,9 @@ vae._build_vae()
 batch_size = 32
 
 callback = callbacks.EarlyStopping(
-    monitor="val_loss",  
-    min_delta=1e-1, 
-    patience=100,  
+    monitor="val_loss",
+    min_delta=1e-1,
+    patience=100,
     verbose=0,
 )
 
@@ -272,11 +287,11 @@ history = vae.fit(
     epochs=N_EPOCHS,
     batch_size=batch_size,
     callbacks=[callback],
-    validation_data=(x_test, x_test)
+    validation_data=(x_test, x_test),
 )
 
-encoder =vae.encoder
-decoder =vae.decoder
+encoder = vae.encoder
+decoder = vae.decoder
 
 evaluation = {}
 evaluation["train"] = vae.evaluate(
@@ -344,9 +359,9 @@ for layer_id in range(1, len(layer_outputs)):
         layer_id=layer_id,
         data=x_trans.apply(minmax_scale),
     )
-    
+
     encodings = pd.DataFrame(encodings, index=x_trans.index, columns=colnames)
-#     print(f"{encodings}")
+    #     print(f"{encodings}")
     encodings["split"] = "train"
     encodings.loc[x_val.index, "split"] = "val"
     encodings.loc[x_test.index, "split"] = "test"
