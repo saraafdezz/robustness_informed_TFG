@@ -44,13 +44,13 @@ run-random: install-ivae
 
 
 
-run-scoring-kegg: run-kegg
+run-scoring-kegg:
 	pixi run --environment cuda papermill notebooks/01-compute_scores.ipynb - \
 		-p model_kind ivae_kegg \
 		> ${RESULTS_FOLDER}/ivae_kegg/logs/scoring.out \
 		2> ${RESULTS_FOLDER}/ivae_kegg/logs/scoring.err
         
-run-scoring-reactome: run-reactome
+run-scoring-reactome:
 	pixi run --environment cuda papermill notebooks/01-compute_scores.ipynb - \
 		-p model_kind ivae_reactome \
 		> ${RESULTS_FOLDER}/ivae_reactome/logs/scoring.out \
