@@ -1,20 +1,20 @@
 #!make
 include .env
-.PHONY: install-ivae format run-kegg run-reactome run-random run-scoring-kegg run-scoring-reactome run-scoring-random
+.PHONY: install-ivae run-kegg run-reactome run-random run-scoring-kegg run-scoring-reactome run-scoring-random
 .ONESHELL:
 
 SHELL := /bin/bash
 FRACS=$$(LANG=en_US seq ${FRAC_START} ${FRAC_STEP} ${FRAC_STOP})
 SEEDS=$$(LANG=en_US seq ${SEED_START} ${SEED_STEP} ${SEED_STOP})
-PY_FILES := isrobust/*.py
+PY_FILES := isrobust_TFM/*.py
 
 
-all: | install-ivae format run-kegg  run-reactome  run-random  run-scoring-kegg  run-scoring-reactome  run-scoring-random
+all: | install-ivae run-kegg  run-reactome  run-random  run-scoring-kegg  run-scoring-reactome  run-scoring-random
 
 install-ivae:
 	pixi install
 
-run-kegg: install-ivae format
+run-kegg: install-ivae 
 	rm -rf ${RESULTS_FOLDER}/ivae_kegg
 	mkdir -p ${RESULTS_FOLDER}/ivae_kegg/logs/
 	parallel -j${N_GPU} CUDA_VISIBLE_DEVICES='$$(({%} - 1))' \
@@ -23,7 +23,7 @@ run-kegg: install-ivae format
 		"2>" ${RESULTS_FOLDER}/ivae_kegg/logs/train_seed-{}.err \
 		::: $(SEEDS)
         
-run-reactome: install-ivae format
+run-reactome: install-ivae 
 	rm -rf ${RESULTS_FOLDER}/ivae_reactome
 	mkdir -p ${RESULTS_FOLDER}/ivae_reactome/logs
 	parallel -j${N_GPU} CUDA_VISIBLE_DEVICES='$$(({%} - 1))' \
@@ -32,7 +32,7 @@ run-reactome: install-ivae format
 		"2>" ${RESULTS_FOLDER}/ivae_reactome/logs/train_seed-{}.err \
 		::: $(SEEDS)
 
-run-random: install-ivae format
+run-random: install-ivae 
 	rm -rf $$(printf "${RESULTS_FOLDER}/ivae_random-%s " $(FRACS))
 	mkdir -p $$(printf "${RESULTS_FOLDER}/ivae_random-%s/logs " $(FRACS))
 	parallel -j${N_GPU} CUDA_VISIBLE_DEVICES='$$(({%} - 1))' \
