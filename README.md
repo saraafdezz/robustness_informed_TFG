@@ -20,11 +20,13 @@ SEED_START=0
 SEED_STOP=99
 SEED_STEP=1
 DEBUG=0
+FRAC_START=0.05
+FRAC_STOP=0.85
+FRAC_STEP=0.2
+RESULTS_FOLDER="path"
 ```
 
 It was run using:
 ```
-screen -dmS ivae
-make
-(reattach)
+screen -d -m make
 ```

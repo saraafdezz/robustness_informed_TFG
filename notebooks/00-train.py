@@ -186,7 +186,7 @@ reactome_pathway_names = reactome.columns
 state = np.random.get_state()
 
 random_layer, random_layer_names = get_random_adj(
-    frac, shape=reactome.shape, size=reactome.size, index=reactome.index, seed=seed
+    frac, shape=reactome.shape, size=reactome.size, index=reactome.index, seed=0
 )
 
 np.random.set_state(state)
