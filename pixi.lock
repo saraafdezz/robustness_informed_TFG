@@ -3866,7 +3866,7 @@ packages:
   size: 73783
   timestamp: 1702518633821
 - kind: pypi
-  name: isrobust-tfm
+  name: isrobust-tfg
   version: 1.0.0
   path: .
   sha256: 5d5e20d53f72a593312332fb605133115391ae0e4f3739d73f6c8896f07a4f23
