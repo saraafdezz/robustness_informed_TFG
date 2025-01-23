@@ -31,15 +31,17 @@
 # from isrobust.utils import set_all_seeds
 
 import sys
-from pathlib import Path
-
 import dotenv
 import numpy as np
 import pandas as pd
 import scanpy as sc
 import tensorflow as tf
+
+from pathlib import Path
+
 from keras import callbacks
 from keras.models import Model
+
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import minmax_scale
 
@@ -55,34 +57,34 @@ from isrobust_TFG.datasets import load_kang
 from isrobust_TFG.utils import set_all_seeds
 
 
-def get_importances(data, abs=False):
-    if abs:
-        return np.abs(data).mean(axis=0)
+def get_importances(data, abs=False): # Calcula la importancia de los datos, si no hay abs, lo pone a false
+    if abs:                              # Comprueba si debe tomar valor absoluto o no
+        return np.abs(data).mean(axis=0) 
     else:
-        return data.mean(axis=0)
+        return data.mean(axis=0) # Lo que devuelve es un vector de una fila unica con la media de cada columna
 
 
-def get_activations(act_model, layer_id, data):
-    data_encoded = act_model.predict(data)[layer_id]
-    return data_encoded
+def get_activations(act_model, layer_id, data):  # Obtiene las activaciones (?) de una capa específica de los datos
+    data_encoded = act_model.predict(data)[layer_id] # act_model es el modelo de la rn que se esta usando para predecir
+    return data_encoded                              # Pasa los datos de entrada a través del modelo y obtiene lass predicciones de la capa indicada
 
 
-# %%
-def train_val_test_split(features, val_size, test_size, stratify, seed):
-    train_size = 1 - (val_size + test_size)
+# Divide el conjunto de datos en train, val y test
+def train_val_test_split(features, val_size, test_size, stratify, seed): 
+    train_size = 1 - (val_size + test_size) # Tamaño del train
 
-    x_train, x_test, y_train, y_test = train_test_split(
+    x_train, x_test, y_train, y_test = train_test_split( # Divide train y test
         features,
-        stratify,
+        stratify,   # (?)
         train_size=train_size,
-        stratify=stratify,
+        stratify=stratify,  # Mantiene las proporciones (?)
         random_state=seed,
     )
 
-    x_val, x_test = train_test_split(
+    x_val, x_test = train_test_split( # Extrae del test el val
         x_test,
         test_size=test_size / (test_size + val_size),
-        stratify=y_test,
+        stratify=y_test, 
         random_state=seed,
     )
 
@@ -95,7 +97,7 @@ def train_val_test_split(features, val_size, test_size, stratify, seed):
 
 args = sys.argv
 
-if len(args) == 5:
+if len(args) == 5:        # Donde se usa?????
     model_kind, debug, frac, seed = args[1:]
     frac = float(frac)
     print(frac)
@@ -109,25 +111,24 @@ seed = int(seed)
 
 print(model_kind, debug, seed)
 
-project_path = Path(dotenv.find_dotenv()).parent
+# Ruta del proyecto
+project_path = Path(dotenv.find_dotenv()).parent 
 print(project_path)
-data_path = project_path.joinpath("data")
+data_path = project_path.joinpath("data") 
 data_path.mkdir(exist_ok=True, parents=True)
 
 set_all_seeds(seed=seed)
 
-tf.config.experimental.enable_op_determinism()
+tf.config.experimental.enable_op_determinism() # Operaciones no dependan de la aleatoriedad -> reproducibilidad
 
-sc.set_figure_params(dpi=300, color_map="inferno")
-sc.settings.verbosity = 1
-sc.logging.print_header()
+sc.set_figure_params(dpi=300, color_map="inferno") # Parametros de visualización 
+sc.settings.verbosity = 1 # Mensajes informativos básicos
+sc.logging.print_header() # Imprime encabezado informativo al principio del script
 
 config = dotenv.dotenv_values()
 debug = bool(int(config["DEBUG"]))
 
-
-# debug= bool(int(debug))
-
+# Para almacenar resultados del proyecto
 results_path = Path(config["RESULTS_FOLDER"])
 print("RESULTS_FOLDER")
 results_path.mkdir(exist_ok=True, parents=True)
@@ -136,9 +137,9 @@ figs_path.mkdir(exist_ok=True, parents=True)
 tables_path = results_path.joinpath("tables")
 tables_path.mkdir(exist_ok=True, parents=True)
 
-print(f"{model_kind}")
+print(f"{model_kind}") # Borrar (?)
 
-# %%
+# Configura parámetros del modelo
 if debug:
     N_EPOCHS = 2
 else:
@@ -153,36 +154,38 @@ elif "ivae_random" in model_kind:
 else:
     raise NotImplementedError(f"{model_kind} not implemented yet.")
 
-print(f"{debug=} {model_kind=}")
+print(f"{debug=} {model_kind=}") # Borrar(?)
 
+# Esto se podría meter en lo anterior o sacar del if directamente
 # %%
 if "ivae_random" in model_kind:
     n_genes = None
 else:
     n_genes = None
-adata = load_kang(data_folder=data_path, normalize=True, n_genes=n_genes)
+    
+adata = load_kang(data_folder=data_path, normalize=True, n_genes=n_genes) # Carga los datos de la db
 
 # %%
-x_trans = adata.to_df()
+x_trans = adata.to_df() # Pasa los datos a df para trabajar en Pandas
 
-# %%
+# Construcción de las matrices de adyacencia
 circuit_adj, circuit_to_pathway_adj = get_adj_matrices(
-    gene_list=x_trans.columns.to_list()
+    gene_list=x_trans.columns.to_list()  
 )
 
+# Remane
 circuit_renamer, pathway_renamer, circuit_to_effector = build_hipathia_renamers()
 
 kegg_circuit_names = circuit_adj.rename(columns=circuit_renamer).columns
-
 kegg_pathway_names = circuit_to_pathway_adj.rename(columns=pathway_renamer).columns
 
-circuit_adj.head()
+circuit_adj.head() # Muestra las primeras filas
 
-# %%
+# Obtener los nombres de las vias de reactome
 reactome = get_reactome_adj()
 reactome_pathway_names = reactome.columns
 
-# %%
+# Para mantener la consistencia establece la config de los random
 state = np.random.get_state()
 
 random_layer, random_layer_names = get_random_adj(
@@ -191,7 +194,7 @@ random_layer, random_layer_names = get_random_adj(
 
 np.random.set_state(state)
 
-# %%
+# Se podria incluir en if anteriores. Sincroniza las dimensiones
 if model_kind == "ivae_kegg":
     x_trans, circuit_adj = sync_gexp_adj(gexp=x_trans, adj=circuit_adj)
 elif model_kind == "ivae_reactome":
@@ -202,21 +205,24 @@ elif "ivae_random" in model_kind:
 
 # print(circuit_adj)
 # print(circuit_to_pathway_adj)
-# %%
 
+# Path para guardar los resultados
 results_path_model = results_path.joinpath(model_kind)
-obs = adata.obs.copy()
 results_path_model.mkdir(exist_ok=True, parents=True)
 
-# %%
-x_train, x_val, x_test = train_val_test_split(
-    x_trans.apply(minmax_scale),
+obs = adata.obs.copy() # (?)
+
+
+# Separa en train, val y test los datos de x_trans 
+x_train, x_val, x_test = train_val_test_split( # Vuelve a separar train test y val ?????? -> Borrar lo anterior??????
+    x_trans.apply(minmax_scale), # Para que los datos esten en un rango similar
     val_size=0.20,
     test_size=0.20,
     stratify=obs["cell_type"].astype(str) + obs["condition"].astype(str),
     seed=seed,
 )
 
+# Crea el vae segun el tipo de modelo
 if model_kind == "ivae_kegg":
     #     vae, encoder, decoder = build_kegg_vae(
     #         circuits=circuit_adj, pathways=circuit_to_pathway_adj, seed=seed
@@ -268,18 +274,20 @@ else:
 
 # vae = InformedVAE(adjacency_matrices=reactome,adjacency_names="reactome",adjacency_activation="tanh")
 
+# Construye el vae
 vae._build_vae()
 
-batch_size = 32
+# Entrenamiento del vae
+batch_size = 32 
 
-callback = callbacks.EarlyStopping(
+callback = callbacks.EarlyStopping( # Detiene el entrenamiento si no hay mejora
     monitor="val_loss",
     min_delta=1e-1,
     patience=100,
     verbose=0,
 )
 
-history = vae.fit(
+history = vae.fit( # Entrena
     x_train,
     x_train,
     shuffle=True,
@@ -293,6 +301,7 @@ history = vae.fit(
 encoder = vae.encoder
 decoder = vae.decoder
 
+# Evaluacion del modelo
 evaluation = {}
 evaluation["train"] = vae.evaluate(
     x_train, vae.predict(x_train), verbose=0, return_dict=True
@@ -302,6 +311,7 @@ evaluation["test"] = vae.evaluate(
     x_test, vae.predict(x_test), verbose=0, return_dict=True
 )
 
+# Formateo de la evaluacion
 pd.DataFrame.from_dict(evaluation).reset_index(names="metric").assign(seed=seed).melt(
     id_vars=["seed", "metric"],
     value_vars=["train", "val", "test"],
@@ -312,10 +322,12 @@ pd.DataFrame.from_dict(evaluation).reset_index(names="metric").assign(seed=seed)
 )
 
 layer_outputs = [layer.output for layer in encoder.layers]
-activation_model = Model(inputs=encoder.input, outputs=layer_outputs)
+activation_model = Model(inputs=encoder.input, outputs=layer_outputs) # Crea nuevo modelo de activacion
 
 # only analyze informed and funnel layers
+# Extrae procesa y guarda las activaciones de las vias
 for layer_id in range(1, len(layer_outputs)):
+        # Nombre de las cols y los layers segun el modelo
     if model_kind == "ivae_kegg":
         if layer_id == 1:
             colnames = kegg_circuit_names
@@ -323,7 +335,7 @@ for layer_id in range(1, len(layer_outputs)):
         elif layer_id == 2:
             colnames = kegg_pathway_names
             layer_name = "pathways"
-        elif layer_id == (len(layer_outputs) - 1):
+        elif layer_id == (len(layer_outputs) - 1): 
             n_latents = len(kegg_pathway_names) // 2
             colnames = [f"latent_{i:02d}" for i in range(n_latents)]
             layer_name = "funnel"
@@ -354,6 +366,8 @@ for layer_id in range(1, len(layer_outputs)):
 
     print(f"encoding layer {layer_id}")
     print("hola 1")
+    
+        # Obtencion de las activaciones de la capa
     encodings = get_activations(
         act_model=activation_model,
         layer_id=layer_id,
@@ -362,18 +376,23 @@ for layer_id in range(1, len(layer_outputs)):
 
     encodings = pd.DataFrame(encodings, index=x_trans.index, columns=colnames)
     #     print(f"{encodings}")
+    
+        # Nuevas columnas
     encodings["split"] = "train"
     encodings.loc[x_val.index, "split"] = "val"
     encodings.loc[x_test.index, "split"] = "test"
     encodings["layer"] = layer_name
     encodings["seed"] = seed
     encodings["model"] = model_kind
+    
+        # Fusiona con la muestra
     encodings = encodings.merge(
         obs[["cell_type", "condition"]],
         how="left",
         left_index=True,
         right_index=True,
     )
+        # Guarda los resultados
     print(f"{results_path_model}")
     encodings.to_pickle(
         results_path_model.joinpath(

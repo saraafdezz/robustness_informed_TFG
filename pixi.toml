@@ -1,5 +1,5 @@
 [project]
-authors = ["albertoem77 <estebanm.alberto@gmail.com>"]
+authors = ["saraafdezz <sara.fer.malv@gmail.com>"]
 channels = ["conda-forge"]
 description = "Add a short description here"
 name = "robusted_informed_TFG"
