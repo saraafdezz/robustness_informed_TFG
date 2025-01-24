@@ -75,7 +75,7 @@ def train_val_test_split(features, val_size, test_size, stratify, seed):
 
     x_train, x_test, y_train, y_test = train_test_split( # Divide train y test
         features,
-        stratify,   # (?)
+        stratify,   
         train_size=train_size,
         stratify=stratify,  # Mantiene las proporciones (?)
         random_state=seed,
@@ -97,6 +97,7 @@ def train_val_test_split(features, val_size, test_size, stratify, seed):
 
 args = sys.argv
 
+# LLamarlo con argparse
 if len(args) == 5:        # Donde se usa?????
     model_kind, debug, frac, seed = args[1:]
     frac = float(frac)
@@ -113,7 +114,6 @@ print(model_kind, debug, seed)
 
 # Ruta del proyecto
 project_path = Path(dotenv.find_dotenv()).parent 
-print(project_path)
 data_path = project_path.joinpath("data") 
 data_path.mkdir(exist_ok=True, parents=True)
 
@@ -126,7 +126,9 @@ sc.settings.verbosity = 1 # Mensajes informativos básicos
 sc.logging.print_header() # Imprime encabezado informativo al principio del script
 
 config = dotenv.dotenv_values()
-debug = bool(int(config["DEBUG"]))
+
+print("Loaded config:", config)
+debug = bool(int(config["DEBUG"])) 
 
 # Para almacenar resultados del proyecto
 results_path = Path(config["RESULTS_FOLDER"])
@@ -137,9 +139,8 @@ figs_path.mkdir(exist_ok=True, parents=True)
 tables_path = results_path.joinpath("tables")
 tables_path.mkdir(exist_ok=True, parents=True)
 
-print(f"{model_kind}") # Borrar (?)
 
-# Configura parámetros del modelo
+# Configura parámetros del modelo -> argparse. Se puede dejar
 if debug:
     N_EPOCHS = 2
 else:
@@ -154,9 +155,7 @@ elif "ivae_random" in model_kind:
 else:
     raise NotImplementedError(f"{model_kind} not implemented yet.")
 
-print(f"{debug=} {model_kind=}") # Borrar(?)
-
-# Esto se podría meter en lo anterior o sacar del if directamente
+# poner como parametro de entrada 
 # %%
 if "ivae_random" in model_kind:
     n_genes = None
@@ -168,7 +167,8 @@ adata = load_kang(data_folder=data_path, normalize=True, n_genes=n_genes) # Carg
 # %%
 x_trans = adata.to_df() # Pasa los datos a df para trabajar en Pandas
 
-# Construcción de las matrices de adyacencia
+# FIltrar por el tipo de modelo y crear una u otra segun el tipo
+# Construcción de las matrices de adyacencia de KEGG
 circuit_adj, circuit_to_pathway_adj = get_adj_matrices(
     gene_list=x_trans.columns.to_list()  
 )
@@ -194,7 +194,7 @@ random_layer, random_layer_names = get_random_adj(
 
 np.random.set_state(state)
 
-# Se podria incluir en if anteriores. Sincroniza las dimensiones
+# Sincroniza las dimensiones. Interseccion entre los de nuestro dataset y los circuitos.
 if model_kind == "ivae_kegg":
     x_trans, circuit_adj = sync_gexp_adj(gexp=x_trans, adj=circuit_adj)
 elif model_kind == "ivae_reactome":
@@ -203,18 +203,14 @@ elif "ivae_random" in model_kind:
     x_trans, random_layer = sync_gexp_adj(x_trans, random_layer)
 
 
-# print(circuit_adj)
-# print(circuit_to_pathway_adj)
-
 # Path para guardar los resultados
 results_path_model = results_path.joinpath(model_kind)
 results_path_model.mkdir(exist_ok=True, parents=True)
 
-obs = adata.obs.copy() # (?)
-
+obs = adata.obs.copy() # Ignorar
 
 # Separa en train, val y test los datos de x_trans 
-x_train, x_val, x_test = train_val_test_split( # Vuelve a separar train test y val ?????? -> Borrar lo anterior??????
+x_train, x_val, x_test = train_val_test_split( 
     x_trans.apply(minmax_scale), # Para que los datos esten en un rango similar
     val_size=0.20,
     test_size=0.20,
@@ -222,7 +218,7 @@ x_train, x_val, x_test = train_val_test_split( # Vuelve a separar train test y v
     seed=seed,
 )
 
-# Crea el vae segun el tipo de modelo
+# Crea el vae segun el tipo de modelo -> añadir a los if
 if model_kind == "ivae_kegg":
     #     vae, encoder, decoder = build_kegg_vae(
     #         circuits=circuit_adj, pathways=circuit_to_pathway_adj, seed=seed
@@ -252,27 +248,6 @@ elif "ivae_random" in model_kind:
     )
 else:
     raise NotImplementedError("Model not yet implemented.")
-
-# batch_size = 32
-
-# callback = callbacks.EarlyStopping(
-#     monitor="val_loss",  # Stop training when `val_loss` is no longer improving
-#     min_delta=1e-1,  # "no longer improving" being defined as "no better than 1e-5 less"
-#     patience=100,  # "no longer improving" being further defined as "for at least 3 epochs"
-#     verbose=0,
-# )
-
-# history = vae.fit(
-#     x_train.values,
-#     shuffle=True,
-#     verbose=0,
-#     epochs=N_EPOCHS,
-#     batch_size=batch_size,
-#     callbacks=[callback],
-#     validation_data=(x_val.values, None),
-# )
-
-# vae = InformedVAE(adjacency_matrices=reactome,adjacency_names="reactome",adjacency_activation="tanh")
 
 # Construye el vae
 vae._build_vae()
@@ -375,7 +350,6 @@ for layer_id in range(1, len(layer_outputs)):
     )
 
     encodings = pd.DataFrame(encodings, index=x_trans.index, columns=colnames)
-    #     print(f"{encodings}")
     
         # Nuevas columnas
     encodings["split"] = "train"
