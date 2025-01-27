@@ -1,4 +1,4 @@
-"""
+""""
 @author: Carlos Loucera
 """
 
@@ -9,6 +9,8 @@ import numpy as np
 import pandas as pd
 
 from isrobust_TFG.utils import get_resource_path
+
+from sklearn.model_selection import train_test_split
 
 
 def get_reactome_adj(pth=None):
@@ -138,3 +140,43 @@ def sync_gexp_adj(gexp, adj):
     adj = adj.loc[gene_list, :]
 
     return gexp, adj
+
+########################################################################################################################
+
+# Funciones auxiliares sara
+def get_importances(data, abs=False): # Calcula la importancia de los datos, si no hay abs, lo pone a false
+    if abs:                              # Comprueba si debe tomar valor absoluto o no
+        return np.abs(data).mean(axis=0) 
+    else:
+        return data.mean(axis=0) # Lo que devuelve es un vector de una fila unica con la media de cada columna
+
+
+def get_activations(act_model, layer_id, data):  # Obtiene las activaciones (?) de una capa específica de los datos
+    data_encoded = act_model.predict(data)[layer_id] # act_model es el modelo de la rn que se esta usando para predecir
+    return data_encoded                              # Pasa los datos de entrada a través del modelo y obtiene lass predicciones de la capa indicada
+
+
+# Divide el conjunto de datos en train, val y test
+def train_val_test_split(features, val_size, test_size, stratify, seed): 
+    train_size = 1 - (val_size + test_size) # Tamaño del train
+
+    x_train, x_test, y_train, y_test = train_test_split( # Divide train y tv est
+        features,
+        stratify,   
+        train_size=train_size,
+        stratify=stratify,  # Mantiene las proporciones (?)
+        random_state=seed,
+    )
+
+    x_val, x_test = train_test_split( # Extrae del test el val
+        x_test,
+        test_size=test_size / (test_size + val_size),
+        stratify=y_test, 
+        random_state=seed,
+    )
+
+    x_train = x_train.astype("float32")
+    x_val = x_val.astype("float32")
+    x_test = x_test.astype("float32")
+
+    return x_train, x_val, x_test
