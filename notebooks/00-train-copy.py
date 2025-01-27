@@ -27,7 +27,7 @@ from isrobust_TFG.bio import (
     sync_gexp_adj,
     get_importances,
     get_activations,
-    train_val_test_split,/home/mesteban/sara/gpu05/TFG/robustness_informed_TFG/isrobust_TFG/bio.py
+    train_val_test_split,
 )
 from isrobust_TFG.CI_VAE_CLASS import InformedVAE
 from isrobust_TFG.datasets import load_kang
@@ -266,3 +266,4 @@ if __name__ == "__main__":
             results_path_model.joinpath(
                 f"encodings_layer-{layer_id:02d}_seed-{seed:02d}.pkl"
             )
+        )

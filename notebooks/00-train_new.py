@@ -25,6 +25,9 @@ from isrobust_TFG.bio import (
     get_random_adj,
     get_reactome_adj,
     sync_gexp_adj,
+    get_importances,
+    get_activations,
+    train_val_test_split,
 )
 from isrobust_TFG.CI_VAE_CLASS import InformedVAE
 from isrobust_TFG.datasets import load_kang
