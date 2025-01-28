@@ -33,7 +33,7 @@ rule all:
 # Instalación
 rule install_ivae:
     shell:
-        "pixi install"
+        "conda install"
 
 # Entrenamiento para KEGG
 rule run_kegg:
@@ -46,7 +46,7 @@ rule run_kegg:
         rm -rf {RESULTS_FOLDER}/ivae_kegg
         mkdir -p {RESULTS_FOLDER}/ivae_kegg/logs/
         parallel -j{N_GPU} CUDA_VISIBLE_DEVICES='{{%}} - 1' \
-            pixi run --environment cuda python notebooks/00-train.py ivae_kegg {DEBUG} {{}} \
+            conda python notebooks/00-train.py ivae_kegg {DEBUG} {{}} \
             ">" {RESULTS_FOLDER}/ivae_kegg/logs/train_seed-{{}}.out \
             "2>" {RESULTS_FOLDER}/ivae_kegg/logs/train_seed-{{}}.err \
             ::: {SEEDS}
@@ -63,7 +63,7 @@ rule run_reactome:
         rm -rf {RESULTS_FOLDER}/ivae_reactome
         mkdir -p {RESULTS_FOLDER}/ivae_reactome/logs/
         parallel -j{N_GPU} CUDA_VISIBLE_DEVICES='{{%}} - 1' \
-            pixi run --environment cuda python notebooks/00-train.py ivae_reactome {DEBUG} {{}} \
+            conda python notebooks/00-train.py ivae_reactome {DEBUG} {{}} \
             ">" {RESULTS_FOLDER}/ivae_reactome/logs/train_seed-{{}}.out \
             "2>" {RESULTS_FOLDER}/ivae_reactome/logs/train_seed-{{}}.err \
             ::: {SEEDS}
@@ -80,7 +80,7 @@ rule run_random:
         rm -rf $(printf "{RESULTS_FOLDER}/ivae_random-%s " {FRACS})
         mkdir -p $(printf "{RESULTS_FOLDER}/ivae_random-%s/logs " {FRACS})
         parallel -j{N_GPU} CUDA_VISIBLE_DEVICES='{{%}} - 1' \
-            pixi run --environment cuda python notebooks/00-train.py ivae_random-{{2}} {DEBUG} {{2}} {{1}} \
+            conda python notebooks/00-train.py ivae_random-{{2}} {DEBUG} {{2}} {{1}} \
             ">" {RESULTS_FOLDER}/ivae_random-{{2}}/logs/train_seed-{{1}}.out \
             "2>" {RESULTS_FOLDER}/ivae_random-{{2}}/logs/train_seed-{{1}}.err \
             ::: {SEEDS} ::: {FRACS}
@@ -94,7 +94,7 @@ rule run_scoring_kegg:
         f"{RESULTS_FOLDER}/ivae_kegg/logs/scoring.out"
     shell:
         """
-        pixi run --environment cuda papermill notebooks/01-compute_scores.ipynb - \
+        conda papermill notebooks/01-compute_scores.ipynb - \
             -p model_kind ivae_kegg \
             > {output} \
             2> {RESULTS_FOLDER}/ivae_kegg/logs/scoring.err
@@ -108,7 +108,7 @@ rule run_scoring_reactome:
         f"{RESULTS_FOLDER}/ivae_reactome/logs/scoring.out"
     shell:
         """
-        pixi run --environment cuda papermill notebooks/01-compute_scores.ipynb - \
+        conda papermill notebooks/01-compute_scores.ipynb - \
             -p model_kind ivae_reactome \
             > {output} \
             2> {RESULTS_FOLDER}/ivae_reactome/logs/scoring.err
@@ -122,8 +122,8 @@ rule run_scoring_random:
         expand(f"{RESULTS_FOLDER}/ivae_random-{frac}/logs/scoring.out", frac=FRACS)
     shell:
         """
-        parallel -j{N_CPU} \
-            pixi run --environment cuda papermill notebooks/01-compute_scores.ipynb - \
+        parallel -j{N_GPU} \
+            conda papermill notebooks/01-compute_scores.ipynb - \
             -p model_kind ivae_random-{{}} -p frac {{}} \
             ">" {RESULTS_FOLDER}/ivae_random-{{}}/logs/scoring.out \
             "2>" {RESULTS_FOLDER}/ivae_random-{{}}/logs/scoring.err \
