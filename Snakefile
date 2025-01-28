@@ -16,6 +16,7 @@ SEED_START = int(os.getenv("SEED_START", "1"))
 SEED_STEP = int(os.getenv("SEED_STEP", "1"))
 SEED_STOP = int(os.getenv("SEED_STOP", "5"))
 
+# Definir rangos
 FRACS = range(FRAC_START, FRAC_STOP + 1, FRAC_STEP)
 SEEDS = range(SEED_START, SEED_STOP + 1, SEED_STEP)
 
