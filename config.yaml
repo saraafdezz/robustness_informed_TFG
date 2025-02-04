@@ -1,0 +1,7 @@
+models:
+  kegg: ivae_kegg
+  reactome:  ivae_reactome
+
+final_output: path/final_result
+
+seed_max: 50

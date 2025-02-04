@@ -1,0 +1,24 @@
+configfile: "config.yaml"
+
+rule all:
+    input:
+        "path/done.txt" 
+
+rule train_model:
+    input:
+        "notebooks/00-train-copy.py"
+    output:
+        directory("path/{model_kind}")
+    params:
+         model_kind=lambda wildcards: wildcards.model_kind
+    shell:
+        "pixi run --environment cuda python {input} --model_kind {params.model_kind}"
+
+rule combine_models:
+    input:
+        expand("path/{model_kind}", model_kind=config["models"].values())
+    output:
+        "path/done.txt"
+    shell:
+        "echo 'Model training completed for: {input}' > {output}"
+
