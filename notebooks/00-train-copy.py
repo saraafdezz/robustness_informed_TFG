@@ -42,20 +42,20 @@ if __name__ == "__main__":
     parser.add_argument("--model_kind", type=str, help="Type of model: ivae_kegg, ivae_reactome or ivae_random")
 #     parser.add_argument("--debug", type=int, help="True to debug with less epochs: Insert 0 or 1")
     parser.add_argument("--frac", type=float, default=1, help="Distribution of random layer (if needed)")
-#     parser.add_argument("--seed", type=int, default=42, help="Seed")
+    parser.add_argument("--seed", type=int, default=42, help="Seed")
     parser.add_argument("--n_genes", type=int, default=None, help="Number of genes")
     args = parser.parse_args()
     model_kind = args.model_kind
 #     debug = args.debug
     frac = args.frac
-#     seed = args.seed
+    seed = args.seed
     n_genes = args.n_genes
 
     print(model_kind, frac, n_genes)
     
     config = dotenv.dotenv_values()
     debug = bool(int(config["DEBUG"])) 
-    seed = int(config["SEED"])
+#     seed = int(config["SEED"])
     set_all_seeds(seed=seed)
 
     # Rutas del proyecto
@@ -63,7 +63,7 @@ if __name__ == "__main__":
     data_path = project_path.joinpath("data") 
     data_path.mkdir(exist_ok=True, parents=True)
     results_path = Path(config["RESULTS_FOLDER"])
-    print("RESULTS_FOLDER")
+    print(f"{results_path}")
     results_path.mkdir(exist_ok=True, parents=True)
     figs_path = results_path.joinpath("figs")
     figs_path.mkdir(exist_ok=True, parents=True)
@@ -134,6 +134,10 @@ if __name__ == "__main__":
     # Path para guardar los resultados
     results_path_model = results_path.joinpath(model_kind)
     results_path_model.mkdir(exist_ok=True, parents=True)
+    print(f"{results_path_model}")
+    results_path_model_seed = results_path_model.joinpath("seed_" + str(seed))
+    results_path_model_seed.mkdir(exist_ok=True, parents=True)
+    print(f"{results_path_model_seed}")
 
     obs = adata.obs.copy() # Ignorar
 
@@ -188,7 +192,7 @@ if __name__ == "__main__":
         var_name="split",
         value_name="score",
     ).assign(model=model_kind).to_pickle(
-        results_path_model.joinpath(f"metrics-seed-{seed:02d}.pkl")
+        results_path_model_seed.joinpath(f"metrics-seed-{seed:02d}.pkl")
     )
 
     layer_outputs = [layer.output for layer in encoder.layers]
@@ -261,9 +265,10 @@ if __name__ == "__main__":
             right_index=True,
         )
             # Guarda los resultados
-        print(f"{results_path_model}")
+        print(f"{results_path_model_seed}")
         encodings.to_pickle(
-            results_path_model.joinpath(
+            results_path_model_seed.joinpath(
                 f"encodings_layer-{layer_id:02d}_seed-{seed:02d}.pkl"
             )
         )
+        print(f" {results_path_model_seed}")

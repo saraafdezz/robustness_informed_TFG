@@ -4,4 +4,4 @@ models:
 
 final_output: path/final_result
 
-seed_max: 50
+seed_max: 5

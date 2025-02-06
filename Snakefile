@@ -18,7 +18,7 @@ rule train_model:
         seed=lambda wildcards: wildcards.seed
     shell:
         """
-        SEED={params.seed} pixi run --environment cuda python {input} --model_kind {params.model_kind}
+        pixi run --environment cuda python {input} --model_kind {params.model_kind} --seed {params.seed}
         echo "Training completed for seed {params.seed} and model {params.model_kind}" > {output}
         """
 
@@ -30,5 +30,7 @@ rule combine_models:
     output:
         "path/done.txt"
     shell:
-        "echo 'Model training completed for: {input}' > {output}"
+        """
+        echo "Model training completed for: hola" > {output}
+        """
 
