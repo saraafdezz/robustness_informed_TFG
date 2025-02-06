@@ -6,7 +6,7 @@ rule all:
     input:
         expand("path/{model_kind}/seed_{seed}/done.txt", 
 		model_kind = config["models"].values(), 
-		seed = range(SEED_MAX + 1)),
+ 		seed = range(SEED_MAX + 1)),
 	"path/done_scoring.txt"		
 
 rule install_ivae:
@@ -40,7 +40,7 @@ rule train_model_reactome:
 	output:
 	    "path/{params.model_kind}/seed_{seed}/done.txt"
 	params:
-	    model_kind = "ivae_reactome",
+	    model_kind = "ivae_reactome"
 	    seed = lambda wildcards: wildcards.seed
 	shell:
 	    """
