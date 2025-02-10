@@ -4,7 +4,7 @@ SEED_MAX = config.get("seed_max", 50)
 
 rule all:
     input:
-        expand("path/{model_kind}/seed_{seed}/done.txt", 
+        expand("path/{model_kind}/done.txt", 
 		model_kind = config["models"].values(), 
 		seed = range(SEED_MAX + 1)),
 	"path/done_scoring.txt"		
@@ -58,13 +58,13 @@ rule scoring_kegg:
 	    seed = lambda wildcards: wildcards.seed                                                                                   
 	shell:                                                                                                                      
 	    """                                                                                                                     
-	    pixi run --environment cuda papermill notebooks/01-compute_scores.ipynb path/ivae_reactome/01-compute_scores_output.ipynb -p model_kind {params.model_kind} seed {params.seed}                         
+	    pixi run --environment cuda python notebooks/01-scoring.py --model_kind {params.model_kind} --seed_start 0 --seed_stop 2 --seed_step 1                         
 	    echo "Scoring completed for ivae_kegg" > {output}                                                                       
 	    """
 
 rule scoring_reactome:
     input:
-     	"path/ivae_reactome/done.txt"
+	"path/ivae_reactome/done.txt"
     output:
         "path/ivae_reactome/scoring_done.txt"
     params:
@@ -72,7 +72,7 @@ rule scoring_reactome:
 	seed = lambda wildcards: wildcards.seed
     shell:
         """
-        pixi run --environment cuda papermill notebooks/01-compute_scores.ipynb path/ivae_kegg/01-compute_scores_output.ipynb -p model_kind {params.model_kind} seed {params.seed}
+        pixi run --environment cuda python notebooks/01-scoring.py --model_kind {params.model_kind} --seed_start 0 --seed_step 1 --seed_stop 2
         echo "Scoring completed for ivae_reactome" > {output}
         """
 
@@ -82,8 +82,6 @@ rule combine_models:
         "path/ivae_reactome/scoring_done.txt",
     output:
         "path/done_scoring.txt"
-    params:
-	seed = lambda wildcards: wildcards.seed
     shell:
         """
         echo "Model training and scoring completed" > {output}

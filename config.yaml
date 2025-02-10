@@ -2,4 +2,4 @@ models:
   kegg: ivae_kegg
   reactome: ivae_reactome
 
-seed_max: 3
+seed_max: 2
