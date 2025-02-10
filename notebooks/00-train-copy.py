@@ -42,13 +42,13 @@ if __name__ == "__main__":
     parser.add_argument("--model_kind", type=str, help="Type of model: ivae_kegg, ivae_reactome or ivae_random")
 #     parser.add_argument("--debug", type=int, help="True to debug with less epochs: Insert 0 or 1")
     parser.add_argument("--frac", type=float, default=1, help="Distribution of random layer (if needed)")
-    parser.add_argument("--seed", type=int, default=42, help="Seed")
+    parser.add_argument("--seed_stop", type=int, default=50, help="Seed stop")
     parser.add_argument("--n_genes", type=int, default=None, help="Number of genes")
     args = parser.parse_args()
     model_kind = args.model_kind
 #     debug = args.debug
     frac = args.frac
-    seed = args.seed
+    seed = args.seed_stop
     n_genes = args.n_genes
 
     print(model_kind, frac, n_genes)
@@ -135,9 +135,9 @@ if __name__ == "__main__":
     results_path_model = results_path.joinpath(model_kind)
     results_path_model.mkdir(exist_ok=True, parents=True)
     print(f"{results_path_model}")
-    results_path_model_seed = results_path_model.joinpath("seed_" + str(seed))
-    results_path_model_seed.mkdir(exist_ok=True, parents=True)
-    print(f"{results_path_model_seed}")
+#     results_path_model_seed = results_path_model.joinpath("seed_" + str(seed))
+#     results_path_model_seed.mkdir(exist_ok=True, parents=True)
+#     print(f"{results_path_model_seed}")
 
     obs = adata.obs.copy() # Ignorar
 
@@ -192,7 +192,7 @@ if __name__ == "__main__":
         var_name="split",
         value_name="score",
     ).assign(model=model_kind).to_pickle(
-        results_path_model_seed.joinpath(f"metrics-seed-{seed:02d}.pkl")
+        results_path_model.joinpath(f"metrics-seed-{seed:02d}.pkl")
     )
 
     layer_outputs = [layer.output for layer in encoder.layers]
@@ -265,10 +265,10 @@ if __name__ == "__main__":
             right_index=True,
         )
             # Guarda los resultados
-        print(f"{results_path_model_seed}")
+        print(f"{results_path_model}")
         encodings.to_pickle(
-            results_path_model_seed.joinpath(
+            results_path_model.joinpath(
                 f"encodings_layer-{layer_id:02d}_seed-{seed:02d}.pkl"
             )
         )
-        print(f" {results_path_model_seed}")
+        print(f" {results_path_model}")

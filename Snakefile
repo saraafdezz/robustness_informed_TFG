@@ -23,13 +23,13 @@ rule train_model_kegg:
         "notebooks/00-train-copy.py"
 	"path/install_done.txt"
     output:
-        "path/{params.model_kind}/seed_{seed}/done.txt"
+        "path/{params.model_kind}/done.txt"
     params:
         model_kind = "ivae_kegg",
         seed=lambda wildcards: wildcards.seed
     shell:
         """
-        pixi run --environment cuda python {input} --model_kind {params.model_kind} --seed {params.seed}
+        pixi run --environment cuda python {input} --model_kind {params.model_kind} --seed_stop {params.seed}
         echo "Training completed for seed {params.seed} and model {params.model_kind}" > {output}
         """
 
@@ -38,21 +38,21 @@ rule train_model_reactome:
 	    "notebook/00-train-copy.py"
 	    "path/install_done.txt"
 	output:
-	    "path/{params.model_kind}/seed_{seed}/done.txt"
+	    "path/{params.model_kind}/done.txt"
 	params:
 	    model_kind = "ivae_reactome",
 	    seed = lambda wildcards: wildcards.seed
 	shell:
 	    """
-	    pixi run --environment cuda python {input} --model_kind {params.model_kind} --seed {params.seed}
+	    pixi run --environment cuda python {input} --model_kind {params.model_kind} --seed_stop {params.seed}
 	    echo "Training completed for seed {params.seed} and model {params.model_kind}" > {output}
 	    """
 
 rule scoring_kegg:                                                                                                          
 	input:                                                                                                                      
-	    expand("path/ivae_kegg/seed_{seed}/done.txt", seed=range(SEED_MAX + 1))                                             
+	    "path/ivae_kegg/done.txt"                                             
 	output:                                                                                                                     
-	    "path/ivae_kegg/seed_{seed}/scoring_done.txt"
+	    "path/ivae_kegg/scoring_done.txt"
 	params:
 	    model_kind = "ivae_kegg"
 	    seed = lambda wildcards: wildcards.seed                                                                                   
@@ -64,9 +64,9 @@ rule scoring_kegg:
 
 rule scoring_reactome:
     input:
-        expand("path/ivae_reactome/seed_{seed}/done.txt", seed=range(SEED_MAX + 1))
+     	"path/ivae_reactome/done.txt"
     output:
-        "path/ivae_reactome/seed_{seed}/scoring_done.txt"
+        "path/ivae_reactome/scoring_done.txt"
     params:
 	model_kind = "ivae_reactome"
 	seed = lambda wildcards: wildcards.seed
@@ -78,8 +78,8 @@ rule scoring_reactome:
 
 rule combine_models:
     input:
-        expand("path/ivae_kegg/seed_{seed}/scoring_done.txt", seed = range(SEED_MAX + 1)),
-        expand("path/ivae_reactome/seed_{seed}/scoring_done.txt", seed = range(SEED_MAX + 1))
+        "path/ivae_kegg/scoring_done.txt",
+        "path/ivae_reactome/scoring_done.txt",
     output:
         "path/done_scoring.txt"
     params:
