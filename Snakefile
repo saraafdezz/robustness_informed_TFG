@@ -52,10 +52,13 @@ rule scoring_kegg:
 	input:                                                                                                                      
 	    expand("path/ivae_kegg/seed_{seed}/done.txt", seed=range(SEED_MAX + 1))                                             
 	output:                                                                                                                     
-	    "path/ivae_kegg/scoring_done.txt"                                                                                   
+	    "path/ivae_kegg/seed_{seed}/scoring_done.txt"
+	params:
+	    model_kind = "ivae_kegg"
+	    seed = lambda wildcards: wildcards.seed                                                                                   
 	shell:                                                                                                                      
 	    """                                                                                                                     
-	    pixi run --environment cuda papermill notebooks/01-compute_scores.ipynb -p model_kind ivae_kegg                         
+	    pixi run --environment cuda papermill notebooks/01-compute_scores.ipynb path/ivae_reactome/01-compute_scores_output.ipynb -p model_kind {params.model_kind} seed {params.seed}                         
 	    echo "Scoring completed for ivae_kegg" > {output}                                                                       
 	    """
 
@@ -63,19 +66,24 @@ rule scoring_reactome:
     input:
         expand("path/ivae_reactome/seed_{seed}/done.txt", seed=range(SEED_MAX + 1))
     output:
-        "path/ivae_reactome/scoring_done.txt"
+        "path/ivae_reactome/seed_{seed}/scoring_done.txt"
+    params:
+	model_kind = "ivae_reactome"
+	seed = lambda wildcards: wildcards.seed
     shell:
         """
-        pixi run --environment cuda papermill notebooks/01-compute_scores.ipynb -p model_kind ivae_reactome
+        pixi run --environment cuda papermill notebooks/01-compute_scores.ipynb path/ivae_kegg/01-compute_scores_output.ipynb -p model_kind {params.model_kind} seed {params.seed}
         echo "Scoring completed for ivae_reactome" > {output}
         """
 
 rule combine_models:
     input:
-        "path/ivae_kegg/scoring_done.txt",
-        "path/ivae_reactome/scoring_done.txt"
+        expand("path/ivae_kegg/seed_{seed}/scoring_done.txt", seed = range(SEED_MAX + 1)),
+        expand("path/ivae_reactome/seed_{seed}/scoring_done.txt", seed = range(SEED_MAX + 1))
     output:
         "path/done_scoring.txt"
+    params:
+	seed = lambda wildcards: wildcards.seed
     shell:
         """
         echo "Model training and scoring completed" > {output}
