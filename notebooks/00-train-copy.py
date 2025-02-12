@@ -42,13 +42,13 @@ if __name__ == "__main__":
     parser.add_argument("--model_kind", type=str, help="Type of model: ivae_kegg, ivae_reactome or ivae_random")
 #     parser.add_argument("--debug", type=int, help="True to debug with less epochs: Insert 0 or 1")
     parser.add_argument("--frac", type=float, default=1, help="Distribution of random layer (if needed)")
-    parser.add_argument("--seed_stop", type=int, default=50, help="Seed stop")
+    parser.add_argument("--seed", type=int, default=50, help="Seed")
     parser.add_argument("--n_genes", type=int, default=None, help="Number of genes")
     args = parser.parse_args()
     model_kind = args.model_kind
 #     debug = args.debug
     frac = args.frac
-    seed = args.seed_stop
+    seed = args.seed
     n_genes = args.n_genes
 
     print(model_kind, frac, n_genes)
@@ -109,6 +109,7 @@ if __name__ == "__main__":
         adj_activ = "tanh"
 
     elif "ivae_random" in model_kind:
+        reactome = get_reactome_adj()
         state = np.random.get_state()
         random_layer, random_layer_names = get_random_adj(
             frac, shape=reactome.shape, size=reactome.size, index=reactome.index, seed=0

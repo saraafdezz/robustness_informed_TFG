@@ -125,6 +125,7 @@ if __name__ == "__main__":
         layer_ids = [1, 2]
         
     elif "ivae_random" in model_kind:
+        reactome = get_reactome_adj()
         n_encoding_layers = 2
         n_genes = 3000 # En los otros models no se pone porque el default ya es None
         state = np.random.get_state()
