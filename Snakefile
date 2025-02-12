@@ -57,7 +57,7 @@ rule train_model_random:
 	    "path/ivae_random/done_{seed}_{frac}.txt"
 	params:
 	    seed = lambda wildcards: wildcards.seed,
-		frac = lambda wildcards: wildcards.seed
+		frac = lambda wildcards: wildcards.frac
 	shell:
 	    """
 	    pixi run --environment cuda python notebooks/00-train-copy.py --model_kind ivae_random --seed {params.seed} --frac {params.frac}
@@ -88,12 +88,12 @@ rule scoring_reactome:
 
 rule scoring_random:
 	input:
-		expand("path/ivae_random/done_{seed}_{frac}.txt", seed=range(SEED_START, SEED_STOP + 1, SEED_STEP), frac=np.arange(FRAC_START, FRAC_STOP, FRAC_STEP))
+		expand("path/ivae_random/done_{seed}_{frac}.txt", seed=range(SEED_START, SEED_STOP + 1, SEED_STEP), frac=np.arange(0, 0.2, 0.1))
 	output:
-		"path/ivae_random/scoring_done.txt"
+		expand("path/ivae_random/scoring_done_{frac}.txt")
 	shell:
 		"""
-		pixi run --environment cuda python notebooks/01-scoring.py --model_kind ivae_random --seed_start {SEED_START} --seed_step {SEED_STEP} --seed_stop {SEED_STOP} --frac {frac}
+		pixi run --environment cuda python notebooks/01-scoring.py --model_kind ivae_random --seed_start {SEED_START} --seed_step {SEED_STEP} --seed_stop {SEED_STOP} --frac {params.frac}
 		echo "Scoring completed for ivae_random" > {output}
 		"""
 
@@ -103,7 +103,7 @@ rule combine_models:
     input:
         "path/ivae_kegg/scoring_done.txt",
         "path/ivae_reactome/scoring_done.txt",
-	"path/ivae_random/scoring_done.txt"
+		expand("path/ivae_random/scoring_done_{frac}.txt")
     output:
         "path/done_scoring.txt"
     shell:

@@ -170,3 +170,5 @@ notebooks/debug.ipynb
 .pixi
 *.egg-info
 
+# snakemake environments
+.snakemake/metadata/
