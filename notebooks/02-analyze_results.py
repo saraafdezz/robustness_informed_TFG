@@ -5,6 +5,8 @@ import numpy as np
 import pandas as pd
 import seaborn as sns
 import tensorflow as tf
+import argparse
+
 
 from isrobust_TFG.utils import (set_all_seeds, print_scores)
 
@@ -19,7 +21,7 @@ if __name__ == "__main__":
 #     parser.add_argument("--seed_stop", type=int, default=50, help="Seed stop")
 #     parser.add_argument("--n_genes", type=int, default=None, help="Number of genes")
     args = parser.parse_args()
-    model_kind = args.model_kind
+#     model_kind = args.model_kind
     start = args.frac_start
     step = args.frac_step
     stop = args.frac_stop
@@ -44,8 +46,12 @@ if __name__ == "__main__":
 
     results_path
 
+#     models = ["ivae_kegg", "ivae_reactome"] + [
+#         f"ivae_random-{frac:.2f}" for frac in frac_list
+#     ]
+
     models = ["ivae_kegg", "ivae_reactome"] + [
-        f"ivae_random-{frac:.2f}" for frac in frac_list
+        f"ivae_random-{frac}" for frac in frac_list
     ]
     models
 
