@@ -54,13 +54,13 @@ rule train_model_random:
 	input:
 	    "path/install_done.txt"
 	output:
-	    "path/ivae_random/done_{frac}_{seed}.txt"
+	    "path/ivae_random/done_{seed}_0.2.txt"
 	params:
 	    seed = lambda wildcards: wildcards.seed,
-		frac = lambda wildcards: wildcards.frac
+		# frac = lambda wildcards: wildcards.frac
 	shell:
 	    """
-	    pixi run --environment cuda python notebooks/00-train-copy.py --model_kind ivae_random --seed {params.seed} --frac {params.frac}
+	    pixi run --environment cuda python notebooks/00-train-copy.py --model_kind ivae_random --seed {params.seed} --frac 0.2
 	    echo "Training completed for seed {params.seed} and model ivae_random" > {output}
 	    """
 
@@ -87,24 +87,21 @@ rule scoring_reactome:
 		"""
 
 rule scoring_random:
-    input:
-        lambda wildcards: expand("path/ivae_random/done_{frac}_{seed}.txt",
-                                 seed=range(SEED_START, SEED_STOP + 1, SEED_STEP),
-                                 frac=[wildcards.frac])
-    output:
-        "path/ivae_random/scoring_done_{frac}.txt"
-    params:
-        frac = lambda wildcards: wildcards.frac
-    shell:
-        """
-        pixi run --environment cuda python notebooks/01-scoring.py --model_kind ivae_random --seed_start {SEED_START} --seed_step {SEED_STEP} --seed_stop {SEED_STOP} --frac {params.frac}
-        echo "Scoring completed for ivae_random" > {output}
-        """
+	input:
+		expand("path/ivae_random/done_{seed}_0.2.txt", seed=range(SEED_START, SEED_STOP + 1, SEED_STEP))
+	output:
+		"path/ivae_random/scoring_done_0.2.txt"
+	shell:
+		"""
+		pixi run --environment cuda python notebooks/01-scoring.py --model_kind ivae_random --seed_start {SEED_START} --seed_step {SEED_STEP} --seed_stop {SEED_STOP} --frac 0.2
+		echo "Scoring completed for ivae_random" > {output}
+		"""
+
 
 
 rule combine_models:
     input:
-        expand("path/ivae_random/scoring_done_{frac}.txt", frac = np.arange(FRAC_START, FRAC_STOP, FRAC_STEP)),
+        "path/ivae_random/scoring_done_0.2.txt",
         "path/ivae_kegg/scoring_done.txt",
         "path/ivae_reactome/scoring_done.txt"
     output:

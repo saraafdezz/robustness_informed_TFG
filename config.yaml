@@ -1,7 +1,3 @@
-models:
-  kegg: ivae_kegg
-  reactome: ivae_reactome
-
 seed_start: 0
 seed_step: 1
 seed_stop: 2
