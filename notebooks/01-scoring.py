@@ -75,8 +75,13 @@ if __name__ == "__main__":
     figs_path.mkdir(exist_ok=True, parents=True)
     tables_path = results_path.joinpath("tables")
     tables_path.mkdir(exist_ok=True, parents=True)
-    results_path_model = results_path.joinpath(model_kind)
-    results_path_model.mkdir(exist_ok=True, parents=True)
+    if("ivae_random" in model_kind):
+        results_path_model = results_path.joinpath(model_kind + f"-{frac}")
+        results_path_model.mkdir(exist_ok=True, parents=True)
+    else:
+        results_path_model = results_path.joinpath(model_kind)
+        results_path_model.mkdir(exist_ok=True, parents=True)
+    print(f"{results_path_model}")
 
     
     adata = load_kang(data_folder=data_path, normalize=True, n_genes=n_genes)
@@ -156,23 +161,23 @@ if __name__ == "__main__":
     custom_params = {"axes.spines.right": False, "axes.spines.top": False}
     sns.set_theme(context="paper", font_scale=0.5, style="ticks", rc=custom_params)
 
-    g = sns.catplot(
-        data=scores_metrics,
-        kind="violin",
-        col="metric",
-        height=2,
-        aspect=0.9,
-        sharey=False,
-        x="model",
-        y="score",
-        hue="split",
-        split=False,
-        cut=0,
-        fill=False,
-        density_norm="count",
-        inner="quart",
-        linewidth=0.5,
-    )
+#     g = sns.catplot(
+#         data=scores_metrics,
+#         kind="violin",
+#         col="metric",
+#         height=2,
+#         aspect=0.9,
+#         sharey=False,
+#         x="model",
+#         y="score",
+#         hue="split",
+#         split=False,
+#         cut=0,
+#         fill=False,
+#         density_norm="count",
+#         inner="quart",
+#         linewidth=0.5,
+#     )
 
     
     

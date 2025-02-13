@@ -54,7 +54,7 @@ rule train_model_random:
 	input:
 	    "path/install_done.txt"
 	output:
-	    "path/ivae_random/done_{frac}_{seed}.txt"
+	    "path/ivae_random-{frac}/done_{seed}.txt"
 	params:
 	    seed = lambda wildcards: wildcards.seed,
 		frac = lambda wildcards: wildcards.frac
@@ -88,11 +88,11 @@ rule scoring_reactome:
 
 rule scoring_random:
     input:
-        lambda wildcards: expand("path/ivae_random/done_{frac}_{seed}.txt",
+        lambda wildcards: expand("path/ivae_random-{frac}/done_{seed}.txt",
                                  seed=range(SEED_START, SEED_STOP + 1, SEED_STEP),
                                  frac=[wildcards.frac])
     output:
-        "path/ivae_random/scoring_done_{frac}.txt"
+        "path/ivae_random-{frac}/scoring_done.txt"
     params:
         frac = lambda wildcards: wildcards.frac
     shell:
@@ -104,7 +104,7 @@ rule scoring_random:
 
 rule combine_models:
     input:
-        expand("path/ivae_random/scoring_done_{frac}.txt", frac = np.arange(FRAC_START, FRAC_STOP, FRAC_STEP)),
+        expand("path/ivae_random-{frac}/scoring_done.txt", frac = np.arange(FRAC_START, FRAC_STOP, FRAC_STEP)),
         "path/ivae_kegg/scoring_done.txt",
         "path/ivae_reactome/scoring_done.txt"
     output:

@@ -133,8 +133,12 @@ if __name__ == "__main__":
 
 
     # Path para guardar los resultados
-    results_path_model = results_path.joinpath(model_kind)
-    results_path_model.mkdir(exist_ok=True, parents=True)
+    if("ivae_random" in model_kind):
+        results_path_model = results_path.joinpath(model_kind + f"-{frac}")
+        results_path_model.mkdir(exist_ok=True, parents=True)
+    else:
+        results_path_model = results_path.joinpath(model_kind)
+        results_path_model.mkdir(exist_ok=True, parents=True)
     print(f"{results_path_model}")
 #     results_path_model_seed = results_path_model.joinpath("seed_" + str(seed))
 #     results_path_model_seed.mkdir(exist_ok=True, parents=True)
