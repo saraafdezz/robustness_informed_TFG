@@ -111,5 +111,6 @@ rule combine_models:
         "path/done_scoring.txt"
     shell:
         """
+		pixi run --environment cuda python notebooks/02-analyze_results.py --frac_start {FRAC_START} --frac_stop {FRAC_STOP} --frac_step {FRAC_STEP}
         echo "Model training and scoring completed" > {output}
         """
