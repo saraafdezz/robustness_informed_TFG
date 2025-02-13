@@ -13,7 +13,7 @@ FRAC_STOP = config.get("frac_stop", 0.85)
 
 rule all:
     input:
-        "path/done_scoring.txt"
+        "path/done_combination.txt"
 
 rule install_ivae:
 	output:
@@ -54,13 +54,13 @@ rule train_model_random:
 	input:
 	    "path/install_done.txt"
 	output:
-	    "path/ivae_random/done_{seed}_0.2.txt"
+	    "path/ivae_random-{frac}/done_{seed}.txt"
 	params:
 	    seed = lambda wildcards: wildcards.seed,
-		# frac = lambda wildcards: wildcards.frac
+		frac = lambda wildcards: wildcards.frac
 	shell:
 	    """
-	    pixi run --environment cuda python notebooks/00-train-copy.py --model_kind ivae_random --seed {params.seed} --frac 0.2
+	    pixi run --environment cuda python notebooks/00-train-copy.py --model_kind ivae_random --seed {params.seed} --frac {params.frac}
 	    echo "Training completed for seed {params.seed} and model ivae_random" > {output}
 	    """
 
@@ -87,26 +87,30 @@ rule scoring_reactome:
 		"""
 
 rule scoring_random:
-	input:
-		expand("path/ivae_random/done_{seed}_0.2.txt", seed=range(SEED_START, SEED_STOP + 1, SEED_STEP))
-	output:
-		"path/ivae_random/scoring_done_0.2.txt"
-	shell:
-		"""
-		pixi run --environment cuda python notebooks/01-scoring.py --model_kind ivae_random --seed_start {SEED_START} --seed_step {SEED_STEP} --seed_stop {SEED_STOP} --frac 0.2
-		echo "Scoring completed for ivae_random" > {output}
-		"""
-
+    input:
+        lambda wildcards: expand("path/ivae_random-{frac}/done_{seed}.txt",
+                                 seed=range(SEED_START, SEED_STOP + 1, SEED_STEP),
+                                 frac=[wildcards.frac])
+    output:
+        "path/ivae_random-{frac}/scoring_done.txt"
+    params:
+        frac = lambda wildcards: wildcards.frac
+    shell:
+        """
+        pixi run --environment cuda python notebooks/01-scoring.py --model_kind ivae_random --seed_start {SEED_START} --seed_step {SEED_STEP} --seed_stop {SEED_STOP} --frac {params.frac}
+        echo "Scoring completed for ivae_random" > {output}
+        """
 
 
 rule combine_models:
     input:
-        "path/ivae_random/scoring_done_0.2.txt",
+        expand("path/ivae_random-{frac}/scoring_done.txt", frac = np.arange(FRAC_START, FRAC_STOP, FRAC_STEP)),
         "path/ivae_kegg/scoring_done.txt",
         "path/ivae_reactome/scoring_done.txt"
     output:
-        "path/done_scoring.txt"
+        "path/done_combination.txt"
     shell:
         """
+		pixi run --environment cuda python notebooks/02-analyze_results.py --frac_start {FRAC_START} --frac_stop {FRAC_STOP} --frac_step {FRAC_STEP}
         echo "Model training and scoring completed" > {output}
         """
