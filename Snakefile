@@ -108,7 +108,7 @@ rule combine_models:
         "path/ivae_kegg/scoring_done.txt",
         "path/ivae_reactome/scoring_done.txt"
     output:
-        "path/done_scoring.txt"
+        "path/done_combination.txt"
     shell:
         """
 		pixi run --environment cuda python notebooks/02-analyze_results.py --frac_start {FRAC_START} --frac_stop {FRAC_STOP} --frac_step {FRAC_STEP}
