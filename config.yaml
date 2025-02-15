@@ -2,11 +2,6 @@ seed_start: 0
 seed_step: 1
 seed_stop: 2
 
-frac_start: 0
-frac_step: 0.1
-frac_stop: 0.3
-
-seeds:
-  - 0
-  - 1
-  - 2
+frac_start: 0.05
+frac_step: 0.2
+frac_stop: 0.5

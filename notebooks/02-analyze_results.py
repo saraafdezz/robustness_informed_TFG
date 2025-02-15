@@ -106,27 +106,27 @@ if __name__ == "__main__":
     sns.set_theme(context="paper", font_scale=2, style="ticks", rc=custom_params)
     fac = 0.7
 
-    g = sns.catplot(
-        data=metric_scores_to_plot,
-        kind="violin",
-        col="metric",
-        height=9 * fac,
-        aspect=16 / 9 * fac,
-        sharey=True,
-        sharex=False,
-        y="Modelo",
-        x="Valor",
-        split=False,
-        cut=0,
-        fill=False,
-        density_norm="count",
-        inner="quart",
-        linewidth=2,
-        legend_out=False,
-        col_wrap=4,
-    )
+    # g = sns.catplot(
+    #     data=metric_scores_to_plot,
+    #     kind="violin",
+    #     col="metric",
+    #     height=9 * fac,
+    #     aspect=16 / 9 * fac,
+    #     sharey=True,
+    #     sharex=False,
+    #     y="Modelo",
+    #     x="Valor",
+    #     split=False,
+    #     cut=0,
+    #     fill=False,
+    #     density_norm="count",
+    #     inner="quart",
+    #     linewidth=2,
+    #     legend_out=False,
+    #     col_wrap=4,
+    # )
 
-    g.savefig("model_mse.pdf")
+    # g.savefig("model_mse.pdf")
 
     scores = (
         pd.concat((clustering_scores, informed_scores), axis=0, ignore_index=True)
