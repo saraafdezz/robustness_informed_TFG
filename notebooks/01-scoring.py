@@ -156,10 +156,10 @@ if __name__ == "__main__":
     scores_metrics = pd.concat(scores_metrics, axis=0, ignore_index=True)
     scores_metrics.to_pickle(results_path_model.joinpath("scores_metrics.pkl"))
 
-    scores_metrics.head()
+#     scores_metrics.head()
 
-    custom_params = {"axes.spines.right": False, "axes.spines.top": False}
-    sns.set_theme(context="paper", font_scale=0.5, style="ticks", rc=custom_params)
+#     custom_params = {"axes.spines.right": False, "axes.spines.top": False}
+#     sns.set_theme(context="paper", font_scale=0.5, style="ticks", rc=custom_params)
 
 #     g = sns.catplot(
 #         data=scores_metrics,
@@ -228,24 +228,24 @@ if __name__ == "__main__":
 
     results_path_model.joinpath("scores_informed.pkl")
 
-    scores_informed.head()
+#     scores_informed.head()
 
-    custom_params = {"axes.spines.right": False, "axes.spines.top": False}
-    sns.set_theme(context="paper", font_scale=0.5, style="ticks", rc=custom_params)
-    plt.figure(figsize=(2, 2))
-    sns.violinplot(
-        data=scores_informed,
-        x="layer",
-        y="score",
-        hue="split",
-        split=False,
-        cut=0,
-        fill=False,
-        density_norm="count",
-        inner="quart",
-        linewidth=0.5,
-    )
-    sns.despine()
+#     custom_params = {"axes.spines.right": False, "axes.spines.top": False}
+#     sns.set_theme(context="paper", font_scale=0.5, style="ticks", rc=custom_params)
+#     plt.figure(figsize=(2, 2))
+#     sns.violinplot(
+#         data=scores_informed,
+#         x="layer",
+#         y="score",
+#         hue="split",
+#         split=False,
+#         cut=0,
+#         fill=False,
+#         density_norm="count",
+#         inner="quart",
+#         linewidth=0.5,
+#     )
+#     sns.despine()
 
     clust_scores = {}
 
@@ -315,28 +315,31 @@ if __name__ == "__main__":
     clust_scores["model"] = model_kind
     clust_scores.to_pickle(results_path_model.joinpath("scores_clustering.pkl"))
 
-    clust_scores.head()
+#     clust_scores.head()
 
-    custom_params = {"axes.spines.right": False, "axes.spines.top": False}
-    sns.set_theme(context="paper", font_scale=0.5, style="ticks", rc=custom_params)
-    plt.figure(figsize=(2, 2))
-    sns.violinplot(
-        data=clust_scores,
-        x="layer",
-        y="score",
-        hue="split",
-        split=False,
-        cut=0,
-        fill=False,
-        density_norm="count",
-        inner="quart",
-        linewidth=0.5,
-    )
-    sns.despine()
-
-
+#     custom_params = {"axes.spines.right": False, "axes.spines.top": False}
+#     sns.set_theme(context="paper", font_scale=0.5, style="ticks", rc=custom_params)
+#     plt.figure(figsize=(2, 2))
+#     sns.violinplot(
+#         data=clust_scores,
+#         x="layer",
+#         y="score",
+#         hue="split",
+#         split=False,
+#         cut=0,
+#         fill=False,
+#         density_norm="count",
+#         inner="quart",
+#         linewidth=0.5,
+#     )
+#     sns.despine()
 
 
+
+    sns.save()
+    clust_scores.save()
+    scores_informed.save()
+    g.save()
 
 
 
