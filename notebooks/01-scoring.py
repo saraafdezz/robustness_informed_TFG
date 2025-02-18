@@ -336,10 +336,10 @@ if __name__ == "__main__":
 
 
 
-    sns.save()
-    clust_scores.save()
-    scores_informed.save()
-    g.save()
+#    sns.save()
+#    clust_scores.save()
+#    scores_informed.save()
+#    g.save()
 
 
 

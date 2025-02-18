@@ -39,12 +39,11 @@ tensorflow = "*"
 isrobust_TFG = {path = ".", editable = true}
 
 
-[feature.ivaecuda]
+[feature.cuda]
 system-requirements = {cuda = "12"}
 dependencies = {cuda = ">=12.1"}
 tasks = {isgpu = "pixi run python -c 'import tensorflow as tf; print(tf.test.is_gpu_available())' --cuda"}
-
 [environments]
 # all environments include the default feature
-ivaecuda = ["ivaecuda"]
+cuda = ["cuda"]
 
