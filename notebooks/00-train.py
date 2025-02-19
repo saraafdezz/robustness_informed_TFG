@@ -37,6 +37,18 @@ from isrobust_TFG.utils import set_all_seeds
 
 # args = sys.argv
 
+# import os
+# import torch
+
+# # Leer la GPU asignada por Snakemake
+# gpu_id = os.environ.get("CUDA_VISIBLE_DEVICES", "0")
+
+# # Asegurar que PyTorch usa la GPU correcta
+# torch.cuda.set_device(int(gpu_id))
+# device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+# print(f"Usando GPU {gpu_id}")
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Train with a specific model")
     parser.add_argument("--model_kind", type=str, help="Type of model: ivae_kegg, ivae_reactome or ivae_random")
