@@ -20,7 +20,7 @@ rule install_ivae:
 		"path/install_done.txt"
 	shell:
 		"""
-		pixi install -e cuda
+		pixi install -e ivaecuda
 		echo "Installation completed" > {output}
 		"""
 
@@ -33,7 +33,7 @@ rule train_model_kegg:
 	    seed = lambda wildcards: wildcards.seed
 	shell:
 	    """
-	    pixi run --environment cuda python notebooks/00-train.py --model_kind ivae_kegg --seed {params.seed}
+	    pixi run --environment ivaecuda python notebooks/00-train.py --model_kind ivae_kegg --seed {params.seed}
 	    echo "Training completed for seed {params.seed} and model ivae_kegg" > {output}
 	    """
 
@@ -46,7 +46,7 @@ rule train_model_reactome:
 	    seed = lambda wildcards: wildcards.seed
 	shell:
 	    """
-	    pixi run --environment cuda python notebooks/00-train.py --model_kind ivae_reactome --seed {params.seed}
+	    pixi run --environment ivaecuda python notebooks/00-train.py --model_kind ivae_reactome --seed {params.seed}
 	    echo "Training completed for seed {params.seed} and model ivae_reactome" > {output}
 	    """
 
@@ -60,7 +60,7 @@ rule train_model_random:
 		frac = lambda wildcards: wildcards.frac
 	shell:
 	    """
-	    pixi run --environment cuda python notebooks/00-train.py --model_kind ivae_random --seed {params.seed} --frac {params.frac}
+	    pixi run --environment ivaecuda python notebooks/00-train.py --model_kind ivae_random --seed {params.seed} --frac {params.frac}
 	    echo "Training completed for seed {params.seed} and model ivae_random" > {output}
 	    """
 
@@ -71,7 +71,7 @@ rule scoring_kegg:
 	    "path/ivae_kegg/scoring_done.txt"
 	shell:                                                                                                                      
 	    """                                                                                                                     
-	    pixi run --environment cuda python notebooks/01-scoring.py --model_kind ivae_kegg --seed_start {SEED_START} --seed_step {SEED_STEP} --seed_stop {SEED_STOP}                         
+	    pixi run --environment ivaecuda python notebooks/01-scoring.py --model_kind ivae_kegg --seed_start {SEED_START} --seed_step {SEED_STEP} --seed_stop {SEED_STOP}                         
 	    echo "Scoring completed for ivae_kegg" > {output}                                                                       
 	    """
 
@@ -82,7 +82,7 @@ rule scoring_reactome:
 		"path/ivae_reactome/scoring_done.txt"
 	shell:
 		"""
-		pixi run --environment cuda python notebooks/01-scoring.py --model_kind ivae_reactome --seed_start {SEED_START} --seed_step {SEED_STEP} --seed_stop {SEED_STOP}
+		pixi run --environment ivaecuda python notebooks/01-scoring.py --model_kind ivae_reactome --seed_start {SEED_START} --seed_step {SEED_STEP} --seed_stop {SEED_STOP}
 		echo "Scoring completed for ivae_reactome" > {output}
 		"""
 
@@ -97,7 +97,7 @@ rule scoring_random:
         frac = lambda wildcards: wildcards.frac
     shell:
         """
-        pixi run --environment cuda python notebooks/01-scoring.py --model_kind ivae_random --seed_start {SEED_START} --seed_step {SEED_STEP} --seed_stop {SEED_STOP} --frac {params.frac}
+        pixi run --environment ivaecuda python notebooks/01-scoring.py --model_kind ivae_random --seed_start {SEED_START} --seed_step {SEED_STEP} --seed_stop {SEED_STOP} --frac {params.frac}
         echo "Scoring completed for ivae_random" > {output}
         """
 
@@ -111,6 +111,6 @@ rule combine_models:
         "path/done_combination.txt"
     shell:
         """
-		pixi run --environment cuda python notebooks/02-analyze_results.py --frac_start {FRAC_START} --frac_stop {FRAC_STOP} --frac_step {FRAC_STEP}
+		pixi run --environment ivaecuda python notebooks/02-analyze_results.py --frac_start {FRAC_START} --frac_stop {FRAC_STOP} --frac_step {FRAC_STEP}
         echo "Model training and scoring completed" > {output}
         """
