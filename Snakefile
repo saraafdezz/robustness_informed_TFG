@@ -33,7 +33,7 @@ rule train_model_kegg:
 	    seed = lambda wildcards: wildcards.seed
 	shell:
 	    """
-	    pixi run --environment cuda python notebooks/00-train-copy.py --model_kind ivae_kegg --seed {params.seed}
+	    pixi run --environment cuda python notebooks/00-train.py --model_kind ivae_kegg --seed {params.seed}
 	    echo "Training completed for seed {params.seed} and model ivae_kegg" > {output}
 	    """
 
@@ -46,7 +46,7 @@ rule train_model_reactome:
 	    seed = lambda wildcards: wildcards.seed
 	shell:
 	    """
-	    pixi run --environment cuda python notebooks/00-train-copy.py --model_kind ivae_reactome --seed {params.seed}
+	    pixi run --environment cuda python notebooks/00-train.py --model_kind ivae_reactome --seed {params.seed}
 	    echo "Training completed for seed {params.seed} and model ivae_reactome" > {output}
 	    """
 
@@ -60,7 +60,7 @@ rule train_model_random:
 		frac = lambda wildcards: wildcards.frac
 	shell:
 	    """
-	    pixi run --environment cuda python notebooks/00-train-copy.py --model_kind ivae_random --seed {params.seed} --frac {params.frac}
+	    pixi run --environment cuda python notebooks/00-train.py --model_kind ivae_random --seed {params.seed} --frac {params.frac}
 	    echo "Training completed for seed {params.seed} and model ivae_random" > {output}
 	    """
 
