@@ -20,7 +20,7 @@ rule install_ivae:
 		"path/install_done.txt"
 	shell:
 		"""
-		pixi install
+		pixi install -e cuda
 		echo "Installation completed" > {output}
 		"""
 

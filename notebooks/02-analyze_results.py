@@ -159,27 +159,28 @@ if __name__ == "__main__":
     sns.set_theme(context="paper", font_scale=2, style="ticks", rc=custom_params)
     fac = 0.7
 
-#     g = sns.catplot(
-#         data=scores_to_plot,
-#         kind="violin",
-#         col="Métrica",
-#         height=9 * fac,
-#         aspect=16 / 9 * fac,
-#         sharey=True,
-#         sharex=False,
-#         y="Modelo",
-#         x="Valor",
-#         split=False,
-#         cut=0,
-#         fill=False,
-#         density_norm="count",
-#         inner="quart",
-#         linewidth=2,
-#         legend_out=False,
-#         col_wrap=4,
-#     )
+    # g = sns.catplot(
+    #     data=scores_to_plot,
+    #     kind="violin",
+    #     col="Métrica",
+    #     height=9 * fac,
+    #     aspect=16 / 9 * fac,
+    #     sharey=True,
+    #     sharex=False,
+    #     y="Modelo",
+    #     x="Valor",
+    #     split=False,
+    #     cut=0,
+    #     fill=False,
+    #     density_norm="count",
+    #     inner="quart",
+    #     linewidth=2,
+    #     legend_out=False,
+    #     col_wrap=4,
+    # )
 
-#     g.savefig("layer_scores.pdf")
+    # g.savefig("layer_scores.pdf")
+
 
     print_scores(informed_scores, "informed.tex")
     print_scores(clustering_scores, "clustering.tex")
