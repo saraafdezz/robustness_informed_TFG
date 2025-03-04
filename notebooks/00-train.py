@@ -3,37 +3,29 @@
 # Kang HM, Subramaniam M, Targ S, et al. Multiplexed droplet single-cell RNA-sequencing using natural genetic variation
 #   Nat Biotechnol. 2020 Nov;38(11):1356]. Nat Biotechnol. 2018;36(1):89-94. doi:10.1038/nbt.4042
 
-import sys
-import dotenv
 import argparse
+from pathlib import Path
+
+import dotenv
 import numpy as np
 import pandas as pd
 import scanpy as sc
 import tensorflow as tf
-
-from pathlib import Path
-
 from keras import callbacks
 from keras.models import Model
-
-from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import minmax_scale
 
 from isrobust_TFG.bio import (
     build_hipathia_renamers,
+    get_activations,
     get_adj_matrices,
     get_random_adj,
     get_reactome_adj,
     sync_gexp_adj,
-    get_importances,
-    get_activations,
     train_val_test_split,
 )
 from isrobust_TFG.CI_VAE_CLASS import InformedVAE
 from isrobust_TFG.datasets import load_kang
-from isrobust_TFG.utils import set_all_seeds
-
-
 
 # args = sys.argv
 
@@ -51,46 +43,44 @@ from isrobust_TFG.utils import set_all_seeds
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Train with a specific model")
-    parser.add_argument("--model_kind", type=str, help="Type of model: ivae_kegg, ivae_reactome or ivae_random")
-#     parser.add_argument("--debug", type=int, help="True to debug with less epochs: Insert 0 or 1")
-    parser.add_argument("--frac", type=float, default=1, help="Distribution of random layer (if needed)")
+    parser.add_argument(
+        "--model_kind",
+        type=str,
+        help="Type of model: ivae_kegg, ivae_reactome or ivae_random",
+    )
+    #     parser.add_argument("--debug", type=int, help="True to debug with less epochs: Insert 0 or 1")
+    parser.add_argument(
+        "--frac", type=float, default=1, help="Distribution of random layer (if needed)"
+    )
     parser.add_argument("--seed", type=int, default=50, help="Seed")
     parser.add_argument("--n_genes", type=int, default=None, help="Number of genes")
+    parser.add_argument(
+        "--results_path_model", type=str, default=".", help="Output folder"
+    )
+    parser.add_argument("--data_path", type=str, default=".", help="Data folder")
+    parser.add_argument("--debug", type=bool, default=False, help="Debug mode")
     args = parser.parse_args()
     model_kind = args.model_kind
-#     debug = args.debug
+    #     debug = args.debug
     frac = args.frac
     seed = args.seed
     n_genes = args.n_genes
+    results_path_model = Path(args.results_path_model)
+    data_path = Path(args.data_path)
+    debug = args.debug
 
+    print("+"*20, debug)
     print(model_kind, frac, n_genes)
-    
-    config = dotenv.dotenv_values()
-    debug = bool(int(config["DEBUG"])) 
-#     seed = int(config["SEED"])
-    set_all_seeds(seed=seed)
 
-    # Rutas del proyecto
-    project_path = Path(dotenv.find_dotenv()).parent 
-    data_path = project_path.joinpath("data") 
-    data_path.mkdir(exist_ok=True, parents=True)
-    results_path = Path(config["RESULTS_FOLDER"])
-    print(f"{results_path}")
-    results_path.mkdir(exist_ok=True, parents=True)
-    figs_path = results_path.joinpath("figs")
-    figs_path.mkdir(exist_ok=True, parents=True)
-    tables_path = results_path.joinpath("tables")
-    tables_path.mkdir(exist_ok=True, parents=True)
-    
-    adata = load_kang(data_folder=data_path, normalize=True) # Carga los datos de la db
-    x_trans = adata.to_df() # Pasa los datos a df para trabajar en Pandas
 
-    tf.config.experimental.enable_op_determinism() # Operaciones no dependan de la aleatoriedad -> reproducibilidad
+    adata = load_kang(data_folder=data_path, normalize=True)  # Carga los datos de la db
+    x_trans = adata.to_df()  # Pasa los datos a df para trabajar en Pandas
 
-    sc.set_figure_params(dpi=300, color_map="inferno") # Parametros de visualización 
-    sc.settings.verbosity = 1 # Mensajes informativos básicos
-    sc.logging.print_header() # Imprime encabezado informativo al principio del script
+    tf.config.experimental.enable_op_determinism()  # Operaciones no dependan de la aleatoriedad -> reproducibilidad
 
+    sc.set_figure_params(dpi=300, color_map="inferno")  # Parametros de visualización
+    sc.settings.verbosity = 1  # Mensajes informativos básicos
+    sc.logging.print_header()  # Imprime encabezado informativo al principio del script
 
     if debug:
         N_EPOCHS = 2
@@ -100,11 +90,15 @@ if __name__ == "__main__":
     # Construye matrices de adyacencia. Sincroniza las dimensiones. Interseccion entre los de nuestro dataset y los circuitos. Crea el VAE.
     if model_kind == "ivae_kegg":
         circuit_adj, circuit_to_pathway_adj = get_adj_matrices(
-            gene_list=x_trans.columns.to_list()  
+            gene_list=x_trans.columns.to_list()
         )
-        circuit_renamer, pathway_renamer, circuit_to_effector = build_hipathia_renamers()
+        circuit_renamer, pathway_renamer, circuit_to_effector = (
+            build_hipathia_renamers()
+        )
         kegg_circuit_names = circuit_adj.rename(columns=circuit_renamer).columns
-        kegg_pathway_names = circuit_to_pathway_adj.rename(columns=pathway_renamer).columns
+        kegg_pathway_names = circuit_to_pathway_adj.rename(
+            columns=pathway_renamer
+        ).columns
         circuit_adj.head()
         n_encoding_layers = 3
         x_trans, circuit_adj = sync_gexp_adj(gexp=x_trans, adj=circuit_adj)
@@ -135,7 +129,7 @@ if __name__ == "__main__":
 
     else:
         raise NotImplementedError("Model not yet implemented.")
-    
+
     vae = InformedVAE(
         adjacency_matrices=model_layer,
         adjacency_names=adj_name,
@@ -143,24 +137,17 @@ if __name__ == "__main__":
         seed=seed,
     )
 
-
-    # Path para guardar los resultados
-    if("ivae_random" in model_kind):
-        results_path_model = results_path.joinpath(model_kind + f"-{frac}")
-        results_path_model.mkdir(exist_ok=True, parents=True)
-    else:
-        results_path_model = results_path.joinpath(model_kind)
-        results_path_model.mkdir(exist_ok=True, parents=True)
+    results_path_model.mkdir(exist_ok=True, parents=True)
     print(f"{results_path_model}")
-#     results_path_model_seed = results_path_model.joinpath("seed_" + str(seed))
-#     results_path_model_seed.mkdir(exist_ok=True, parents=True)
-#     print(f"{results_path_model_seed}")
+    #     results_path_model_seed = results_path_model.joinpath("seed_" + str(seed))
+    #     results_path_model_seed.mkdir(exist_ok=True, parents=True)
+    #     print(f"{results_path_model_seed}")
 
-    obs = adata.obs.copy() # Ignorar
+    obs = adata.obs.copy()  # Ignorar
 
-    # Separa en train, val y test los datos de x_trans 
-    x_train, x_val, x_test = train_val_test_split( 
-        x_trans.apply(minmax_scale), # Para que los datos esten en un rango similar
+    # Separa en train, val y test los datos de x_trans
+    x_train, x_val, x_test = train_val_test_split(
+        x_trans.apply(minmax_scale),  # Para que los datos esten en un rango similar
         val_size=0.20,
         test_size=0.20,
         stratify=obs["cell_type"].astype(str) + obs["condition"].astype(str),
@@ -169,16 +156,16 @@ if __name__ == "__main__":
 
     # Construye y entrena el vae
     vae._build_vae()
-    batch_size = 32 
+    batch_size = 32
 
-    callback = callbacks.EarlyStopping( # Detiene el entrenamiento si no hay mejora
+    callback = callbacks.EarlyStopping(  # Detiene el entrenamiento si no hay mejora
         monitor="val_loss",
         min_delta=1e-1,
         patience=100,
         verbose=0,
     )
 
-    history = vae.fit( # Entrena
+    history = vae.fit(  # Entrena
         x_train,
         x_train,
         shuffle=True,
@@ -197,13 +184,17 @@ if __name__ == "__main__":
     evaluation["train"] = vae.evaluate(
         x_train, vae.predict(x_train), verbose=0, return_dict=True
     )
-    evaluation["val"] = vae.evaluate(x_val, vae.predict(x_val), verbose=0, return_dict=True)
+    evaluation["val"] = vae.evaluate(
+        x_val, vae.predict(x_val), verbose=0, return_dict=True
+    )
     evaluation["test"] = vae.evaluate(
         x_test, vae.predict(x_test), verbose=0, return_dict=True
     )
 
     # Formateo de la evaluacion
-    pd.DataFrame.from_dict(evaluation).reset_index(names="metric").assign(seed=seed).melt(
+    pd.DataFrame.from_dict(evaluation).reset_index(names="metric").assign(
+        seed=seed
+    ).melt(
         id_vars=["seed", "metric"],
         value_vars=["train", "val", "test"],
         var_name="split",
@@ -213,12 +204,14 @@ if __name__ == "__main__":
     )
 
     layer_outputs = [layer.output for layer in encoder.layers]
-    activation_model = Model(inputs=encoder.input, outputs=layer_outputs) # Crea nuevo modelo de activacion
+    activation_model = Model(
+        inputs=encoder.input, outputs=layer_outputs
+    )  # Crea nuevo modelo de activacion
 
     # only analyze informed and funnel layers
     # Extrae procesa y guarda las activaciones de las vias
     for layer_id in range(1, len(layer_outputs)):
-            # Nombre de las cols y los layers segun el modelo
+        # Nombre de las cols y los layers segun el modelo
         if model_kind == "ivae_kegg":
             if layer_id == 1:
                 colnames = kegg_circuit_names
@@ -226,7 +219,7 @@ if __name__ == "__main__":
             elif layer_id == 2:
                 colnames = kegg_pathway_names
                 layer_name = "pathways"
-            elif layer_id == (len(layer_outputs) - 1): 
+            elif layer_id == (len(layer_outputs) - 1):
                 n_latents = len(kegg_pathway_names) // 2
                 colnames = [f"latent_{i:02d}" for i in range(n_latents)]
                 layer_name = "funnel"
@@ -257,7 +250,7 @@ if __name__ == "__main__":
 
         print(f"encoding layer {layer_id}")
 
-            # Obtencion de las activaciones de la capa
+        # Obtencion de las activaciones de la capa
         encodings = get_activations(
             act_model=activation_model,
             layer_id=layer_id,
@@ -266,7 +259,7 @@ if __name__ == "__main__":
 
         encodings = pd.DataFrame(encodings, index=x_trans.index, columns=colnames)
 
-            # Nuevas columnas
+        # Nuevas columnas
         encodings["split"] = "train"
         encodings.loc[x_val.index, "split"] = "val"
         encodings.loc[x_test.index, "split"] = "test"
@@ -274,14 +267,14 @@ if __name__ == "__main__":
         encodings["seed"] = seed
         encodings["model"] = model_kind
 
-            # Fusiona con la muestra
+        # Fusiona con la muestra
         encodings = encodings.merge(
             obs[["cell_type", "condition"]],
             how="left",
             left_index=True,
             right_index=True,
         )
-            # Guarda los resultados
+        # Guarda los resultados
         print(f"{results_path_model}")
         encodings.to_pickle(
             results_path_model.joinpath(
