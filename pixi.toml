@@ -39,12 +39,20 @@ tensorflow = "*"
 isrobust_TFG = {path = ".", editable = true}
 torch = ">=2.6.0, <3"
 
+[feature.tools.dependencies]
+prefect = "*"
+prefect-dask = "*"
+
+[feature.tools.pypi-dependencies]
+prefect-shell = "*"
 
 [feature.ivaecuda]
 system-requirements = {cuda = "12"}
 dependencies = {cuda = ">=12.1, <12.2"}
 tasks = {isgpu = "pixi run python -c 'import tensorflow as tf; print(tf.test.is_gpu_available())' --cuda"}
+
 [environments]
 # all environments include the default feature
 ivaecuda = ["ivaecuda"]
+tools = ["tools"]
 
