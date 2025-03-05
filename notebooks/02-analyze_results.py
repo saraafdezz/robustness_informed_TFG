@@ -20,11 +20,18 @@ if __name__ == "__main__":
 #     parser.add_argument("--seed_step", type=int, default=1, help="Seed step")
 #     parser.add_argument("--seed_stop", type=int, default=50, help="Seed stop")
 #     parser.add_argument("--n_genes", type=int, default=None, help="Number of genes")
+
+    parser.add_argument(
+        "--results_path", type=str, default=".", help="Output folder"
+    )
+    parser.add_argument("--data_path", type=str, default=".", help="Data folder")
     args = parser.parse_args()
 #     model_kind = args.model_kind
     start = args.frac_start
     step = args.frac_step
     stop = args.frac_stop
+    results_path = Path(args.results_path)
+    data_path = Path(args.data_path)
 #     seed_start = args.seed_start
 #     seed_step = args.seed_step
 #     seed_stop = args.seed_stop
@@ -32,15 +39,15 @@ if __name__ == "__main__":
     frac_list = np.arange(start, stop, step)
     
 
-    project_path = Path(dotenv.find_dotenv()).parent
-    data_path = project_path.joinpath("data")
+    # project_path = Path(dotenv.find_dotenv()).parent
+    # data_path = project_path.joinpath("data")
 
     tf.config.experimental.enable_op_determinism()
     config = dotenv.dotenv_values()
 
     frac_list = np.arange(start, stop, step)
 
-    results_path = Path(config["RESULTS_FOLDER"]).resolve()
+    # results_path = Path(config["RESULTS_FOLDER"]).resolve()
     figs_path = results_path.joinpath("figs")
     tables_path = results_path.joinpath("tables")
 
@@ -106,27 +113,27 @@ if __name__ == "__main__":
     sns.set_theme(context="paper", font_scale=2, style="ticks", rc=custom_params)
     fac = 0.7
 
-    # g = sns.catplot(
-    #     data=metric_scores_to_plot,
-    #     kind="violin",
-    #     col="metric",
-    #     height=9 * fac,
-    #     aspect=16 / 9 * fac,
-    #     sharey=True,
-    #     sharex=False,
-    #     y="Modelo",
-    #     x="Valor",
-    #     split=False,
-    #     cut=0,
-    #     fill=False,
-    #     density_norm="count",
-    #     inner="quart",
-    #     linewidth=2,
-    #     legend_out=False,
-    #     col_wrap=4,
-    # )
+    g = sns.catplot(
+        data=metric_scores_to_plot,
+        kind="violin",
+        col="metric",
+        height=9 * fac,
+        aspect=16 / 9 * fac,
+        sharey=True,
+        sharex=False,
+        y="Modelo",
+        x="Valor",
+        split=False,
+        cut=0,
+        fill=False,
+        density_norm="count",
+        inner="quart",
+        linewidth=2,
+        legend_out=False,
+        col_wrap=4,
+    )
 
-    # g.savefig("model_mse.pdf")
+    g.savefig("model_mse.pdf")
 
     scores = (
         pd.concat((clustering_scores, informed_scores), axis=0, ignore_index=True)
@@ -182,5 +189,5 @@ if __name__ == "__main__":
     # g.savefig("layer_scores.pdf")
 
 
-    print_scores(informed_scores, "informed.tex")
-    print_scores(clustering_scores, "clustering.tex")
+    # print_scores(informed_scores, "informed.tex")
+    # print_scores(clustering_scores, "clustering.tex")

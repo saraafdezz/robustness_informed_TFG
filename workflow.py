@@ -235,6 +235,60 @@ def score_training(model_type: str, seed_start: str, seed_step: str, seed_stop: 
 
 # TODO: make a task for analyze
 
+# @task(
+#     cache_policy=TASK_SOURCE + (INPUTS - "gpu_id"), retries=3, retry_delay_seconds=2
+# ) 
+@task
+def analyze_results(frac_start: str, frac_step: str, frac_stop: str, gpu_id=None):
+    """Runs the training script for a given model type, seed, and optionally fraction.
+    Which GPU to use is also passed as an argument."""
+    # TODO: adapt to only CPUs scenarios
+
+    results_folder = os.path.join(RESULTS_FOLDER)
+
+    command = [
+        "pixi",
+        "run",
+        "--environment",
+        "ivaecuda",
+        "python",
+        "notebooks/02-analyze_results.py",
+        "--frac_start",
+        str(frac_start),
+        "--frac_step",
+        str(frac_step),
+        "--frac_stop",
+        str(frac_stop),
+        "--results_path",
+        results_folder,
+        "--data_path",
+        DATA_PATH,
+    ]
+
+    print("*" * 20, DEBUG)
+
+    log_file_out = os.path.join(results_folder, "logs", f"analyze-results.out")
+    log_file_err = os.path.join(results_folder, "logs", f"analyze-results.err")
+
+    ShellOperation(
+        commands=[
+            " ".join(command),  # Join command and redirect.
+        ],
+        env={
+            **os.environ,
+            "CUDA_VISIBLE_DEVICES": str(gpu_id),
+        },  # Set CUDA_VISIBLE_DEVICES
+    ).run()
+
+    # create outputs
+    fname_informed = f"informed.txt"
+    return os.path.join(RESULTS_FOLDER, fname_informed)
+
+    fname_clustering = f"clustering.txt"
+    return os.path.join(RESULTS_FOLDER, fname_clustering)
+
+
+
 # --- Flows ---
 
 
@@ -280,6 +334,7 @@ def main_flow(results_folder: str = RESULTS_FOLDER):
     wait(models_scoring)
 
     # TODO: add analyze
+    analyze_results.submit(FRAC_START, FRAC_STEP, FRAC_STOP, gpu_id=index % N_GPU)
     
     # Give time to shutdown connections
     time.sleep(2) 
