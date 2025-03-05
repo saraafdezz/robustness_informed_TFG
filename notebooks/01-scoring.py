@@ -49,6 +49,13 @@ if __name__ == "__main__":
     parser.add_argument("--seed_step", type=int, default=1, help="Seed step")
     parser.add_argument("--seed_stop", type=int, default=50, help="Seed stop")
     parser.add_argument("--n_genes", type=int, default=None, help="Number of genes")
+    parser.add_argument(
+        "--results_path", type=str, default=".", help="Output folder"
+    )
+    parser.add_argument("--data_path", type=str, default=".", help="Data folder")
+    # parser.add_argument("--figs_path", type=str, default=".", help="Figures folder")
+    # parser.add_argument("--tables_path", type=str, default=".", help="Tables folder")
+    parser.add_argument("--debug", type=bool, default=False, help="Debug mode")
     args = parser.parse_args()
     model_kind = args.model_kind
     frac = args.frac
@@ -56,20 +63,27 @@ if __name__ == "__main__":
     seed_step = args.seed_step
     seed_stop = args.seed_stop
     n_genes = args.n_genes
+    results_path = Path(args.results_path)
+    data_path = Path(args.data_path)
+    # figs_path = Path(args.figs_path)
+    # tables_path = Path(args.tables_path)
+    debug = args.debug
+
+    print("+"*20, debug)
 
     print(model_kind, frac, n_genes)
     
     config = dotenv.dotenv_values()
-    debug = bool(int(config["DEBUG"])) 
+ #   debug = bool(int(config["DEBUG"])) 
 #     set_all_seeds(seed=seed)
     batch_size = 256 * cpu_count() + 1
 
 
     # Rutas del proyecto
-    project_path = Path(dotenv.find_dotenv()).parent
-    data_path = project_path.joinpath("data")
-    data_path.mkdir(exist_ok=True, parents=True)
-    results_path = Path(config["RESULTS_FOLDER"])
+    # project_path = Path(dotenv.find_dotenv()).parent
+    # data_path = project_path.joinpath("data")
+    # data_path.mkdir(exist_ok=True, parents=True)
+    # results_path = Path(config["RESULTS_FOLDER"])
     results_path.mkdir(exist_ok=True, parents=True)
     figs_path = results_path.joinpath("figs")
     figs_path.mkdir(exist_ok=True, parents=True)

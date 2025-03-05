@@ -160,6 +160,81 @@ def run_training(model_type: str, seed: str, frac: str = None, gpu_id=None):
         return os.path.join(RESULTS_FOLDER, model_type, fname)
 
 
+# TODO: make a task for scoring
+
+@task(
+    cache_policy=TASK_SOURCE + (INPUTS - "gpu_id"), retries=3, retry_delay_seconds=2
+) 
+def score_training(model_type: str, seed_start: str, seed_step: str, seed_stop: str, frac: str = None, gpu_id=None):
+    """Runs the training script for a given model type, seed, and optionally fraction.
+    Which GPU to use is also passed as an argument."""
+    # TODO: adapt to only CPUs scenarios
+
+    results_folder = os.path.join(RESULTS_FOLDER)
+
+    command = [
+        "pixi",
+        "run",
+        "--environment",
+        "ivaecuda",
+        "python",
+        "notebooks/01-scoring.py",
+        "--model_kind",
+        model_type,
+        "--seed_start",
+        str(seed_start),
+        "--seed_step",
+        str(seed_step),
+        "--seed_stop",
+        str(seed_stop),
+        "--results_path",
+        results_folder,
+        "--data_path",
+        DATA_PATH,
+    ]
+
+    print("*" * 20, DEBUG)
+
+    if DEBUG:
+        command.extend(["--debug", str(DEBUG)])
+    if frac:
+        command.extend(["--frac", str(frac)])
+
+    log_file_out = os.path.join(results_folder, "logs", f"scoring-model-{model_type}.out")
+    log_file_err = os.path.join(results_folder, "logs", f"scoring-model-{model_type}.err")
+
+    ShellOperation(
+        commands=[
+            " ".join(command),  # Join command and redirect.
+        ],
+        env={
+            **os.environ,
+            "CUDA_VISIBLE_DEVICES": str(gpu_id),
+        },  # Set CUDA_VISIBLE_DEVICES
+    ).run()
+
+    # create outputs
+    fname_informed = f"scores_informed.pkl"
+    if "random" in model_type:
+        return os.path.join(RESULTS_FOLDER, f"{model_type}-{frac}", fname_informed)
+    else:
+        return os.path.join(RESULTS_FOLDER, model_type, fname_informed)
+
+    fname_clustering = f"scores_clustering.pkl"
+    if "random" in model_type:
+        return os.path.join(RESULTS_FOLDER, f"{model_type}-{frac}", fname_clustering)
+    else:
+        return os.path.join(RESULTS_FOLDER, model_type, fname_clustering)
+
+    fname_metrics = f"scores_metrics.pkl"
+    if "random" in model_type:
+        return os.path.join(RESULTS_FOLDER, f"{model_type}-{frac}", fname_metrics)
+    else:
+        return os.path.join(RESULTS_FOLDER, model_type, fname_metrics)
+
+
+# TODO: make a task for analyze
+
 # --- Flows ---
 
 
@@ -192,6 +267,19 @@ def main_flow(results_folder: str = RESULTS_FOLDER):
             model_ = model
         seeds_run.append(run_training.submit(model_, seed, frac, gpu_id=index % N_GPU))
     wait(seeds_run)
+
+    # TODO: add scoring
+    models_scoring = []
+    for index, model in enumerate(models):
+        if "random" in model:
+            model_, frac = model.split("-")
+        else:
+            frac = None
+            model_ = model
+        models_scoring.append(score_training.submit(model_, SEED_START, SEED_STEP, SEED_STOP, frac, gpu_id=index % N_GPU))
+    wait(models_scoring)
+
+    # TODO: add analyze
     
     # Give time to shutdown connections
     time.sleep(2) 
