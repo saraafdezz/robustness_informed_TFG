@@ -162,9 +162,10 @@ def run_training(model_type: str, seed: str, frac: str = None, gpu_id=None):
 
 # TODO: make a task for scoring
 
-@task(
-    cache_policy=TASK_SOURCE + (INPUTS - "gpu_id"), retries=3, retry_delay_seconds=2
-) 
+# @task(
+#     cache_policy=TASK_SOURCE + (INPUTS - "gpu_id"), retries=3, retry_delay_seconds=2
+# ) 
+@task
 def score_training(model_type: str, seed_start: str, seed_step: str, seed_stop: str, frac: str = None, gpu_id=None):
     """Runs the training script for a given model type, seed, and optionally fraction.
     Which GPU to use is also passed as an argument."""

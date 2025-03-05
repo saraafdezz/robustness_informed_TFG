@@ -199,7 +199,7 @@ if __name__ == "__main__":
 
     for layer_id in layer_ids:
         if results_path_model.joinpath(
-            f"encodings_layer-{layer_id:02d}_seed-00.kl"
+            f"encodings_layer-{layer_id:02d}_seed-00.pkl"
         ).exists():
             results_layer = [
                 pd.read_pickle(
@@ -212,9 +212,7 @@ if __name__ == "__main__":
         else:
             continue
 
-
         scores_informed[layer_id] = {}
-        
         for split in ["train", "test", "val"]:
             results = [
                 x.loc[x["split"] == split].drop(non_layer_names, axis=1)
@@ -265,7 +263,7 @@ if __name__ == "__main__":
 
     for layer_id in layer_ids:
         if results_path_model.joinpath(
-            f"encodings_layer-{layer_id:02d}_seed-00kl"
+            f"encodings_layer-{layer_id:02d}_seed-00.pkl"
         ).exists():
             results_layer = [
                 pd.read_pickle(
