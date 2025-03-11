@@ -2,6 +2,9 @@ import itertools
 import os
 import subprocess
 import time
+import numpy as np
+import hashlib
+from datetime import datetime
 
 from dotenv import load_dotenv, find_dotenv
 from prefect import flow, task
@@ -58,23 +61,51 @@ print("*" * 20, os.getenv("PREFECT_RESULTS_PERSIST_BY_DEFAULT"))
 
 
 # As in the makefile
-# TODO: use a pythonic way to get the list of fractions and seeds
-FRACS = [
-    str(x)
-    for x in subprocess.check_output(
-        f"LANG=en_US seq {FRAC_START} {FRAC_STEP} {FRAC_STOP}", shell=True, text=True
-    )
-    .strip()
-    .split("\n")
-]
-SEEDS = [
-    str(x)
-    for x in subprocess.check_output(
-        f"LANG=en_US seq {SEED_START} {SEED_STEP} {SEED_STOP}", shell=True, text=True
-    )
-    .strip()
-    .split("\n")
-]
+fracsAux = np.arange(float(FRAC_START), float(FRAC_STOP), float(FRAC_STEP))
+FRACS = [str(round(x, 10)) for x in fracsAux]
+
+seedsAux = range(int(SEED_START), int(SEED_STOP) + 1, int(SEED_STEP))
+SEEDS = [str(x) for x in seedsAux]
+
+# --- For launching only necessary tasks ---
+
+def file_hash(filepath):
+    """Devuelve un hash del contenido del archivo para detectar cambios."""
+    if not os.path.exists(filepath):
+        return None
+    hasher = hashlib.md5()
+    with open(filepath, "rb") as f:
+        hasher.update(f.read())
+    return hasher.hexdigest()
+
+def cache_key_fn(_, params):
+    """Clave de caché basada en el hash del script y en la existencia del output."""
+    script_path = "notebooks/00-train.py"  # Ajusta esto según el script real
+    output_path = params.get("output_file")
+
+    script_hash = file_hash(script_path)
+    output_exists = os.path.exists(output_path)
+
+    if not output_exists:
+        return str(datetime.now())  # Si el output no existe, fuerza la ejecución
+
+    return f"{script_hash}-{output_path}"
+
+def execute_if_file_missing(task, output_files):
+    """
+    Verifica si los archivos de salida existen. Si algún archivo falta, ejecuta la tarea.
+    """
+    # Comprobamos si algún archivo de salida falta
+    for file in output_files:
+        if not os.path.exists(file):
+            print(f"Archivo {file} no encontrado. Ejecutando tarea.")
+            task.run()
+            return  # Ejecutar solo la tarea correspondiente y salir
+
+    print("Todos los archivos existen. No es necesario ejecutar la tarea.")
+    return None  # No es necesario ejecutar ninguna tarea
+
+
 
 
 # --- Tasks ---
@@ -101,20 +132,16 @@ def create_folders(model_type: str, frac: str = None):
     return
 
 
-@task(
-    cache_policy=TASK_SOURCE + (INPUTS - "gpu_id"), retries=3, retry_delay_seconds=2
-) 
-def run_training(model_type: str, seed: str, frac: str = None, gpu_id=None):
-    """Runs the training script for a given model type, seed, and optionally fraction.
-    Which GPU to use is also passed as an argument."""
-    # TODO: adapt to only CPUs scenarios
 
+@task(cache_policy=TASK_SOURCE + (INPUTS - "gpu_id"), cache_key_fn=cache_key_fn, 
+    retries=3, retry_delay_seconds=2)
+def run_training(model_type: str, seed: str, frac: str = None, gpu_id=None):
+    """Ejecuta el entrenamiento y genera un archivo de salida."""
     results_folder = os.path.join(RESULTS_FOLDER, model_type)
     if frac:
-        results_folder = os.path.join(
-            RESULTS_FOLDER, f"{model_type}-{frac}"
-        ) 
+        results_folder = os.path.join(RESULTS_FOLDER, f"{model_type}-{frac}")
 
+    output_file = os.path.join(results_folder, f"metrics-seed-{int(seed):02d}.pkl")
     command = [
         "pixi",
         "run",
@@ -122,50 +149,29 @@ def run_training(model_type: str, seed: str, frac: str = None, gpu_id=None):
         "ivaecuda",
         "python",
         "notebooks/00-train.py",
-        "--model_kind",
-        model_type,
-        "--seed",
-        str(seed),
-        "--results_path_model",
-        results_folder,
-        "--data_path",
-        DATA_PATH,
+        "--model_kind", model_type,
+        "--seed", str(seed),
+        "--results_path_model", results_folder,
+        "--data_path", DATA_PATH,
     ]
-
-    print("*" * 20, DEBUG)
 
     if DEBUG:
         command.extend(["--debug", str(DEBUG)])
     if frac:
         command.extend(["--frac", str(frac)])
 
-    log_file_out = os.path.join(results_folder, "logs", f"train_seed-{seed}.out")
-    log_file_err = os.path.join(results_folder, "logs", f"train_seed-{seed}.err")
-
     ShellOperation(
-        commands=[
-            " ".join(command),  # Join command and redirect.
-        ],
-        env={
-            **os.environ,
-            "CUDA_VISIBLE_DEVICES": str(gpu_id),
-        },  # Set CUDA_VISIBLE_DEVICES
+        commands=[" ".join(command)],
+        env={**os.environ, "CUDA_VISIBLE_DEVICES": str(gpu_id)},
     ).run()
 
-    # create outputs
-    fname = f"metrics-seed-{int(seed):02d}.pkl"
-    if "random" in model_type:
-        return os.path.join(RESULTS_FOLDER, f"{model_type}-{frac}", fname)
-    else:
-        return os.path.join(RESULTS_FOLDER, model_type, fname)
+    return output_file  # Devuelve la ruta del archivo generado
 
 
-# TODO: make a task for scoring
-
-# @task(
-#     cache_policy=TASK_SOURCE + (INPUTS - "gpu_id"), retries=3, retry_delay_seconds=2
-# ) 
-@task
+# Task for scoring
+@task(
+    cache_policy=TASK_SOURCE + (INPUTS - "gpu_id"), retries=3, retry_delay_seconds=2
+) 
 def score_training(model_type: str, seed_start: str, seed_step: str, seed_stop: str, frac: str = None, gpu_id=None):
     """Runs the training script for a given model type, seed, and optionally fraction.
     Which GPU to use is also passed as an argument."""
@@ -234,12 +240,11 @@ def score_training(model_type: str, seed_start: str, seed_step: str, seed_stop: 
         return os.path.join(RESULTS_FOLDER, model_type, fname_metrics)
 
 
-# TODO: make a task for analyze
+# Task for analyze
 
-# @task(
-#     cache_policy=TASK_SOURCE + (INPUTS - "gpu_id"), retries=3, retry_delay_seconds=2
-# ) 
-@task
+@task(
+    cache_policy=TASK_SOURCE + (INPUTS - "gpu_id"), retries=3, retry_delay_seconds=2
+)
 def analyze_results(frac_start: str, frac_step: str, frac_stop: str, gpu_id=None):
     """Runs the training script for a given model type, seed, and optionally fraction.
     Which GPU to use is also passed as an argument."""
@@ -323,7 +328,7 @@ def main_flow(results_folder: str = RESULTS_FOLDER):
         seeds_run.append(run_training.submit(model_, seed, frac, gpu_id=index % N_GPU))
     wait(seeds_run)
 
-    # TODO: add scoring
+    # Scoring
     models_scoring = []
     for index, model in enumerate(models):
         if "random" in model:
@@ -334,7 +339,7 @@ def main_flow(results_folder: str = RESULTS_FOLDER):
         models_scoring.append(score_training.submit(model_, SEED_START, SEED_STEP, SEED_STOP, frac, gpu_id=index % N_GPU))
     wait(models_scoring)
 
-    # TODO: add analyze
+    # Analyze results
     analyze_results.submit(FRAC_START, FRAC_STEP, FRAC_STOP, gpu_id=index % N_GPU)
     
     # Give time to shutdown connections
