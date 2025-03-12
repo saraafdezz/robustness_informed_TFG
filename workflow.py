@@ -52,7 +52,7 @@ RESULTS_FOLDER = os.getenv("RESULTS_FOLDER", "results")
 N_GPU = int(os.getenv("N_GPU", "3"))
 N_CPU = int(os.getenv("N_CPU", "4"))
 DEBUG = check_cli_arg_is_bool(os.getenv("DEBUG", "1"))
-DATA_PATH = os.getenv("DATA_PATH", "data")  # add data path
+DATA_PATH = os.getenv("DATA_PATH", "data/data_pathsingle")  # add data path
 
 N_DEVICES = N_GPU if N_GPU > 0 else (N_CPU -1)
 
@@ -111,7 +111,8 @@ def execute_if_file_missing(task, output_files):
 # --- Tasks ---
 
 
-@task(cache_policy=TASK_SOURCE + INPUTS)
+# @task(cache_policy=TASK_SOURCE + INPUTS)
+@task
 def install_ivae(results_folder: str = RESULTS_FOLDER):
     """Installs dependencies using pixi."""
     os.makedirs(f"{results_folder}/logs", exist_ok=True)
@@ -120,7 +121,8 @@ def install_ivae(results_folder: str = RESULTS_FOLDER):
     return
 
 
-@task(cache_policy=TASK_SOURCE + INPUTS)
+# @task(cache_policy=TASK_SOURCE + INPUTS)
+@task
 def create_folders(model_type: str, frac: str = None):
     """Creates folders for a given model type, seed, and optionally fraction."""
     results_folder = os.path.join(RESULTS_FOLDER, model_type)
@@ -133,8 +135,9 @@ def create_folders(model_type: str, frac: str = None):
 
 
 
-@task(cache_policy=TASK_SOURCE + (INPUTS - "gpu_id"), cache_key_fn=cache_key_fn, 
-    retries=3, retry_delay_seconds=2)
+# @task(cache_policy=TASK_SOURCE + (INPUTS - "gpu_id"), cache_key_fn=cache_key_fn, 
+#     retries=3, retry_delay_seconds=2)
+@task
 def run_training(model_type: str, seed: str, frac: str = None, gpu_id=None):
     """Ejecuta el entrenamiento y genera un archivo de salida."""
     results_folder = os.path.join(RESULTS_FOLDER, model_type)
@@ -169,9 +172,10 @@ def run_training(model_type: str, seed: str, frac: str = None, gpu_id=None):
 
 
 # Task for scoring
-@task(
-    cache_policy=TASK_SOURCE + (INPUTS - "gpu_id"), retries=3, retry_delay_seconds=2
-) 
+# @task(
+#     cache_policy=TASK_SOURCE + (INPUTS - "gpu_id"), retries=3, retry_delay_seconds=2
+# ) 
+@task
 def score_training(model_type: str, seed_start: str, seed_step: str, seed_stop: str, frac: str = None, gpu_id=None):
     """Runs the training script for a given model type, seed, and optionally fraction.
     Which GPU to use is also passed as an argument."""
@@ -242,9 +246,10 @@ def score_training(model_type: str, seed_start: str, seed_step: str, seed_stop: 
 
 # Task for analyze
 
-@task(
-    cache_policy=TASK_SOURCE + (INPUTS - "gpu_id"), retries=3, retry_delay_seconds=2
-)
+# @task(
+#     cache_policy=TASK_SOURCE + (INPUTS - "gpu_id"), retries=3, retry_delay_seconds=2
+# )
+@task
 def analyze_results(frac_start: str, frac_step: str, frac_stop: str, gpu_id=None):
     """Runs the training script for a given model type, seed, and optionally fraction.
     Which GPU to use is also passed as an argument."""
