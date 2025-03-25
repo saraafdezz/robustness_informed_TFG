@@ -136,21 +136,20 @@ def run_training(model_type: str, seed: str, frac: str = None, gpu_id=None):
         env={**os.environ, "CUDA_VISIBLE_DEVICES": str(gpu_id)},
     ).run()
 
-    print(f"Tarea completada: {model_type} - seed {seed}")
+    print(f"Tarea run_training completada: {model_type} - seed {seed}")
 
     return output_file  # Devuelve la ruta del archivo generado
 
 
 
 # Task for scoring
-@task(
-    cache_policy=TASK_SOURCE + (INPUTS - "gpu_id"), retries=3, retry_delay_seconds=2
-) 
+@task(cache_policy=TASK_SOURCE + (INPUTS - "gpu_id"), retries=3, retry_delay_seconds=2)
 def score_training(model_type: str, seed_start: str, seed_step: str, seed_stop: str, frac: str = None, gpu_id=None):
     """Runs the training script for a given model type, seed, and optionally fraction.
     Which GPU to use is also passed as an argument."""
     # TODO: adapt to only CPUs scenarios
 
+    print(f"Ejecutando scoring para el modelo {model_type}...")
     results_folder = os.path.join(RESULTS_FOLDER)
 
     command = [
@@ -181,9 +180,6 @@ def score_training(model_type: str, seed_start: str, seed_step: str, seed_stop: 
     if frac:
         command.extend(["--frac", str(frac)])
 
-    log_file_out = os.path.join(results_folder, "logs", f"scoring-model-{model_type}.out")
-    log_file_err = os.path.join(results_folder, "logs", f"scoring-model-{model_type}.err")
-
     ShellOperation(
         commands=[
             " ".join(command),  # Join command and redirect.
@@ -194,25 +190,24 @@ def score_training(model_type: str, seed_start: str, seed_step: str, seed_stop: 
         },  # Set CUDA_VISIBLE_DEVICES
     ).run()
 
-    # create outputs
+    # Archivos de salida esperados.
     fname_informed = f"scores_informed.pkl"
-    if "random" in model_type:
-        return os.path.join(RESULTS_FOLDER, f"{model_type}-{frac}", fname_informed)
-    else:
-        return os.path.join(RESULTS_FOLDER, model_type, fname_informed)
-
     fname_clustering = f"scores_clustering.pkl"
-    if "random" in model_type:
-        return os.path.join(RESULTS_FOLDER, f"{model_type}-{frac}", fname_clustering)
-    else:
-        return os.path.join(RESULTS_FOLDER, model_type, fname_clustering)
-
     fname_metrics = f"scores_metrics.pkl"
-    if "random" in model_type:
-        return os.path.join(RESULTS_FOLDER, f"{model_type}-{frac}", fname_metrics)
-    else:
-        return os.path.join(RESULTS_FOLDER, model_type, fname_metrics)
 
+    # Rutas finales de los archivos generados.
+    if "random" in model_type:
+        base_path = os.path.join(RESULTS_FOLDER, f"{model_type}-{frac}")
+    else:
+        base_path = os.path.join(RESULTS_FOLDER, model_type)
+
+    print(f"Tarea scoring_training completada: {model_type}")
+
+    return [
+        os.path.join(base_path, fname_informed),
+        os.path.join(base_path, fname_clustering),
+        os.path.join(base_path, fname_metrics),
+    ]
 
 # Task for analyze
 
@@ -247,9 +242,6 @@ def analyze_results(frac_start: str, frac_step: str, frac_stop: str, gpu_id=None
 
     print("*" * 20, DEBUG)
 
-    log_file_out = os.path.join(results_folder, "logs", f"analyze-results.out")
-    log_file_err = os.path.join(results_folder, "logs", f"analyze-results.err")
-
     ShellOperation(
         commands=[
             " ".join(command),  # Join command and redirect.
@@ -281,14 +273,23 @@ def execute_if_file_missing(task, *args, output_files=None, **kwargs):
     # Verificar si faltan archivos
     missing_files = [file for file in output_files if not os.path.exists(file)]
     
+    # Si hay archivos faltantes, ejecutamos la tarea
     if missing_files:
         print(f"Archivos faltantes detectados: {missing_files}. Ejecutando la tarea...")
-        task_future = task.submit(*args, **kwargs)  # Esto debería crear la tarea y ejecutarla
+        
+        # Llamamos a submit() para lanzar la tarea
+        task_future = task.submit(*args, **kwargs)
+        print(f"Estado de la tarea después de enviar: {task_future.state}")
+        task_future.result()  # Esto puede darte más información sobre la ejecución
+
+        
+        # Asegurarnos de que la tarea se ha lanzado correctamente
+        if task_future:
+            print(f"Tarea enviada para el modelo {args[0]}")
         return task_future
     else:
-        print("Todos los archivos existen. No se ejecuta la tarea.")
+        print(f"Todos los archivos existen: {output_files}. No se ejecuta la tarea.")
         return None
-
 
 
 
@@ -315,6 +316,8 @@ def main_flow(results_folder: str = RESULTS_FOLDER):
         create_folders.submit(model_, frac)
     wait(folders)
 
+
+    # Training
     seeds_run = []
     for index, (model, seed) in enumerate(itertools.product(models, SEEDS)):
         if "random" in model:
@@ -345,11 +348,33 @@ def main_flow(results_folder: str = RESULTS_FOLDER):
     for index, model in enumerate(models):
         if "random" in model:
             model_, frac = model.split("-")
+            base_path = os.path.join(RESULTS_FOLDER, f"{model_}-{frac}")
         else:
             frac = None
             model_ = model
-        models_scoring.append(score_training.submit(model_, SEED_START, SEED_STEP, SEED_STOP, frac, gpu_id=index % N_GPU))
+            base_path = os.path.join(RESULTS_FOLDER, model_)
+
+        # Definir los archivos de salida esperados
+        fname_informed = f"scores_informed.pkl"
+        fname_clustering = f"scores_clustering.pkl"
+        fname_metrics = f"scores_metrics.pkl"
+        output_files =  [
+            os.path.join(base_path, fname_informed),
+            os.path.join(base_path, fname_clustering),
+            os.path.join(base_path, fname_metrics),
+        ]
+
+        # Solo ejecuta la tarea si faltan los archivos de scoring
+        task_future = execute_if_file_missing(
+            score_training, model_, SEED_START, SEED_STEP, SEED_STOP, frac, gpu_id=index % N_GPU, output_files=output_files
+        )
+
+        if task_future:  # Solo añadimos tareas que se ejecutan
+            models_scoring.append(task_future)
+
+    # Esperamos que todas las tareas de scoring se completen
     wait(models_scoring)
+
 
     # Analyze results
     analyze_results.submit(FRAC_START, FRAC_STEP, FRAC_STOP, gpu_id=index % N_GPU)
