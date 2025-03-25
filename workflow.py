@@ -78,41 +78,11 @@ def file_hash(filepath):
         hasher.update(f.read())
     return hasher.hexdigest()
 
-def cache_key_fn(_, params):
-    """Clave de caché basada en el hash del script y en la existencia del output."""
-    script_path = "notebooks/00-train.py"  # Ajusta esto según el script real
-    output_path = params.get("output_file")
-
-    script_hash = file_hash(script_path)
-    output_exists = os.path.exists(output_path)
-
-    if not output_exists:
-        return str(datetime.now())  # Si el output no existe, fuerza la ejecución
-
-    return f"{script_hash}-{output_path}"
-
-def execute_if_file_missing(task, output_files):
-    """
-    Verifica si los archivos de salida existen. Si algún archivo falta, ejecuta la tarea.
-    """
-    # Comprobamos si algún archivo de salida falta
-    for file in output_files:
-        if not os.path.exists(file):
-            print(f"Archivo {file} no encontrado. Ejecutando tarea.")
-            task.run()
-            return  # Ejecutar solo la tarea correspondiente y salir
-
-    print("Todos los archivos existen. No es necesario ejecutar la tarea.")
-    return None  # No es necesario ejecutar ninguna tarea
-
-
-
 
 # --- Tasks ---
 
 
-# @task(cache_policy=TASK_SOURCE + INPUTS)
-@task
+@task(cache_policy=TASK_SOURCE + INPUTS)
 def install_ivae(results_folder: str = RESULTS_FOLDER):
     """Installs dependencies using pixi."""
     os.makedirs(f"{results_folder}/logs", exist_ok=True)
@@ -121,8 +91,7 @@ def install_ivae(results_folder: str = RESULTS_FOLDER):
     return
 
 
-# @task(cache_policy=TASK_SOURCE + INPUTS)
-@task
+@task(cache_policy=TASK_SOURCE + INPUTS)
 def create_folders(model_type: str, frac: str = None):
     """Creates folders for a given model type, seed, and optionally fraction."""
     results_folder = os.path.join(RESULTS_FOLDER, model_type)
@@ -135,9 +104,7 @@ def create_folders(model_type: str, frac: str = None):
 
 
 
-# @task(cache_policy=TASK_SOURCE + (INPUTS - "gpu_id"), cache_key_fn=cache_key_fn, 
-#     retries=3, retry_delay_seconds=2)
-@task
+@task(cache_policy=TASK_SOURCE + (INPUTS - "gpu_id"), retries=3, retry_delay_seconds=2)
 def run_training(model_type: str, seed: str, frac: str = None, gpu_id=None):
     """Ejecuta el entrenamiento y genera un archivo de salida."""
     results_folder = os.path.join(RESULTS_FOLDER, model_type)
@@ -155,7 +122,8 @@ def run_training(model_type: str, seed: str, frac: str = None, gpu_id=None):
         "--model_kind", model_type,
         "--seed", str(seed),
         "--results_path_model", results_folder,
-        "--data_path", DATA_PATH,
+        "--data_path",
+        DATA_PATH,
     ]
 
     if DEBUG:
@@ -168,14 +136,16 @@ def run_training(model_type: str, seed: str, frac: str = None, gpu_id=None):
         env={**os.environ, "CUDA_VISIBLE_DEVICES": str(gpu_id)},
     ).run()
 
+    print(f"Tarea completada: {model_type} - seed {seed}")
+
     return output_file  # Devuelve la ruta del archivo generado
 
 
+
 # Task for scoring
-# @task(
-#     cache_policy=TASK_SOURCE + (INPUTS - "gpu_id"), retries=3, retry_delay_seconds=2
-# ) 
-@task
+@task(
+    cache_policy=TASK_SOURCE + (INPUTS - "gpu_id"), retries=3, retry_delay_seconds=2
+) 
 def score_training(model_type: str, seed_start: str, seed_step: str, seed_stop: str, frac: str = None, gpu_id=None):
     """Runs the training script for a given model type, seed, and optionally fraction.
     Which GPU to use is also passed as an argument."""
@@ -246,10 +216,9 @@ def score_training(model_type: str, seed_start: str, seed_step: str, seed_stop: 
 
 # Task for analyze
 
-# @task(
-#     cache_policy=TASK_SOURCE + (INPUTS - "gpu_id"), retries=3, retry_delay_seconds=2
-# )
-@task
+@task(
+    cache_policy=TASK_SOURCE + (INPUTS - "gpu_id"), retries=3, retry_delay_seconds=2
+)
 def analyze_results(frac_start: str, frac_step: str, frac_stop: str, gpu_id=None):
     """Runs the training script for a given model type, seed, and optionally fraction.
     Which GPU to use is also passed as an argument."""
@@ -300,6 +269,29 @@ def analyze_results(frac_start: str, frac_step: str, frac_stop: str, gpu_id=None
 
 
 
+# --- Funciones auxiliares
+
+def execute_if_file_missing(task, *args, output_files=None, **kwargs):
+    """
+    Ejecuta la tarea si los archivos de salida no existen.
+    """
+    if output_files is None:
+        output_files = []
+
+    # Verificar si faltan archivos
+    missing_files = [file for file in output_files if not os.path.exists(file)]
+    
+    if missing_files:
+        print(f"Archivos faltantes detectados: {missing_files}. Ejecutando la tarea...")
+        task_future = task.submit(*args, **kwargs)  # Esto debería crear la tarea y ejecutarla
+        return task_future
+    else:
+        print("Todos los archivos existen. No se ejecuta la tarea.")
+        return None
+
+
+
+
 # --- Flows ---
 
 
@@ -330,8 +322,23 @@ def main_flow(results_folder: str = RESULTS_FOLDER):
         else:
             frac = None
             model_ = model
-        seeds_run.append(run_training.submit(model_, seed, frac, gpu_id=index % N_GPU))
-    wait(seeds_run)
+
+        # Definir la ruta esperada del archivo de salida
+        results_folder = os.path.join(RESULTS_FOLDER, model_)
+        if frac:
+            results_folder = os.path.join(RESULTS_FOLDER, f"{model_}-{frac}")
+        output_file = os.path.join(results_folder, f"metrics-seed-{int(seed):02d}.pkl")
+
+        # Solo ejecuta la tarea si falta el archivo
+        task_future = execute_if_file_missing(
+            run_training, model_, seed, frac, gpu_id=index % N_GPU, output_files=[output_file]
+        )
+
+        if task_future:  # Asegurar que solo añadimos tareas que realmente se ejecutaron
+            seeds_run.append(task_future)
+
+    wait(seeds_run)  # Espera a todas las tareas enviadas
+
 
     # Scoring
     models_scoring = []
