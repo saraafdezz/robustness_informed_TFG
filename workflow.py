@@ -107,11 +107,12 @@ def create_folders(model_type: str, frac: str = None):
 @task(cache_policy=TASK_SOURCE + (INPUTS - "gpu_id"), retries=3, retry_delay_seconds=2)
 def run_training(model_type: str, seed: str, frac: str = None, gpu_id=None):
     """Ejecuta el entrenamiento y genera un archivo de salida."""
+    output_files = []
     results_folder = os.path.join(RESULTS_FOLDER, model_type)
     if frac:
         results_folder = os.path.join(RESULTS_FOLDER, f"{model_type}-{frac}")
 
-    output_file = os.path.join(results_folder, f"metrics-seed-{int(seed):02d}.pkl")
+    output_1 = os.path.join(results_folder, f"metrics-seed-{int(seed):02d}.pkl")
     command = [
         "pixi",
         "run",
@@ -135,10 +136,38 @@ def run_training(model_type: str, seed: str, frac: str = None, gpu_id=None):
         commands=[" ".join(command)],
         env={**os.environ, "CUDA_VISIBLE_DEVICES": str(gpu_id)},
     ).run()
+    if ("random") in model_type:
+        output_2 = os.path.join(results_folder,
+                f"encodings_layer-01_seed-{int(seed):02d}.pkl"
+            )
+        output_3 = os.path.join(results_folder,
+            f"encodings_layer-04_seed-{int(seed):02d}.pkl"
+        )
+        output_files = [output_1, output_2, output_3]
+    elif ("reactome") in model_type:
+        output_2 = os.path.join(results_folder,
+                f"encodings_layer-01_seed-{int(seed):02d}.pkl"
+            )
+        output_3 = os.path.join(results_folder,
+            f"encodings_layer-04_seed-{int(seed):02d}.pkl"
+        )
+        output_files = [output_1, output_2, output_3]
+
+    elif ("kegg") in model_type:
+        output_2 = os.path.join(results_folder,
+                f"encodings_layer-01_seed-{int(seed):02d}.pkl"
+            )
+        output_3 = os.path.join(results_folder,
+            f"encodings_layer-02_seed-{int(seed):02d}.pkl"
+        )
+        output_4 = os.path.join(results_folder,
+            f"encodings_layer-05_seed-{int(seed):02d}.pkl"
+        )
+        output_files = [output_1, output_2, output_3, output_4]
 
     print(f"Tarea run_training completada: {model_type} - seed {seed}")
 
-    return output_file  # Devuelve la ruta del archivo generado
+    return output_files  # Devuelve la ruta del archivo generado
 
 
 
@@ -327,14 +356,44 @@ def main_flow(results_folder: str = RESULTS_FOLDER):
             model_ = model
 
         # Definir la ruta esperada del archivo de salida
+        output_files = []
         results_folder = os.path.join(RESULTS_FOLDER, model_)
         if frac:
             results_folder = os.path.join(RESULTS_FOLDER, f"{model_}-{frac}")
-        output_file = os.path.join(results_folder, f"metrics-seed-{int(seed):02d}.pkl")
+        output_1 = os.path.join(results_folder, f"metrics-seed-{int(seed):02d}.pkl")
+        if ("random") in model_:
+            output_2 = os.path.join(results_folder,
+                    f"encodings_layer-01_seed-{int(seed):02d}.pkl"
+                )
+            output_3 = os.path.join(results_folder,
+                f"encodings_layer-04_seed-{int(seed):02d}.pkl"
+            )
+            output_files = [output_1, output_2, output_3]
+        elif ("reactome") in model_:
+            output_2 = os.path.join(results_folder,
+                    f"encodings_layer-01_seed-{int(seed):02d}.pkl"
+                )
+            output_3 = os.path.join(results_folder,
+                f"encodings_layer-04_seed-{int(seed):02d}.pkl"
+            )
+            output_files = [output_1, output_2, output_3]
+
+        elif ("kegg") in model_:
+            output_2 = os.path.join(results_folder,
+                    f"encodings_layer-01_seed-{int(seed):02d}.pkl"
+                )
+            output_3 = os.path.join(results_folder,
+                f"encodings_layer-02_seed-{int(seed):02d}.pkl"
+            )
+            output_4 = os.path.join(results_folder,
+                f"encodings_layer-05_seed-{int(seed):02d}.pkl"
+            )
+            output_files = [output_1, output_2, output_3, output_4]
+
 
         # Solo ejecuta la tarea si falta el archivo
         task_future = execute_if_file_missing(
-            run_training, model_, seed, frac, gpu_id=index % N_GPU, output_files=[output_file]
+            run_training, model_, seed, frac, gpu_id=index % N_GPU, output_files=output_files
         )
 
         if task_future:  # Asegurar que solo añadimos tareas que realmente se ejecutaron
