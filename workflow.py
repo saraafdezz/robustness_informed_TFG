@@ -232,11 +232,13 @@ def score_training(model_type: str, seed_start: str, seed_step: str, seed_stop: 
 
     print(f"Tarea scoring_training completada: {model_type}")
 
-    return [
+    output_files = [
         os.path.join(base_path, fname_informed),
         os.path.join(base_path, fname_clustering),
         os.path.join(base_path, fname_metrics),
     ]
+
+    return output_files
 
 # Task for analyze
 
@@ -249,7 +251,6 @@ def analyze_results(frac_start: str, frac_step: str, frac_stop: str, gpu_id=None
     # TODO: adapt to only CPUs scenarios
 
     results_folder = os.path.join(RESULTS_FOLDER)
-
     command = [
         "pixi",
         "run",
@@ -283,10 +284,16 @@ def analyze_results(frac_start: str, frac_step: str, frac_stop: str, gpu_id=None
 
     # create outputs
     fname_informed = f"informed.txt"
-    return os.path.join(RESULTS_FOLDER, fname_informed)
-
     fname_clustering = f"clustering.txt"
-    return os.path.join(RESULTS_FOLDER, fname_clustering)
+    model_mse = f"model_mse.pdf"
+    layer_scores = f"layer_scores.pdf"
+    mse = f"mse.tex"
+    output_files = [os.path.join(RESULTS_FOLDER, fname_informed), 
+                    os.path.join(RESULTS_FOLDER, fname_clustering)
+                    os.path.join(RESULTS_FOLDER, model_mse)
+                    os.path.join(RESULTS_FOLDER, layer_scores)
+                    os.path.join(RESULTS_FOLDER, mse)]
+    return output_files
 
 
 
@@ -436,7 +443,26 @@ def main_flow(results_folder: str = RESULTS_FOLDER):
 
 
     # Analyze results
-    analyze_results.submit(FRAC_START, FRAC_STEP, FRAC_STOP, gpu_id=index % N_GPU)
+    results_folder = os.path.join(RESULTS_FOLDER)
+    fname_informed = f"informed.txt"
+    fname_clustering = f"clustering.txt"
+    model_mse = f"model_mse.pdf"
+    layer_scores = f"layer_scores.pdf"
+    mse = f"mse.tex"
+    output_files = [os.path.join(RESULTS_FOLDER, fname_informed), 
+                    os.path.join(RESULTS_FOLDER, fname_clustering)
+                    os.path.join(RESULTS_FOLDER, model_mse)
+                    os.path.join(RESULTS_FOLDER, layer_scores)
+                    os.path.join(RESULTS_FOLDER, mse)]
+    # Solo ejecuta la tarea si faltan los archivos de scoring
+    task_future = execute_if_file_missing(
+        analyze_results, FRAC_START, FRAC_STEP, FRAC_STOP, gpu_id=index % N_GPU, output_files=output_files
+    )
+    if task_future:  # Solo añadimos tareas que se ejecutan
+            analyze_results.append(task_future)
+
+    # Esperamos que todas las tareas de scoring se completen
+    wait(analyze_results)
     
     # Give time to shutdown connections
     time.sleep(2) 
