@@ -107,6 +107,7 @@ def create_folders(model_type: str, frac: str = None):
 @task(cache_policy=TASK_SOURCE + (INPUTS - "gpu_id"), retries=3, retry_delay_seconds=2)
 def run_training(model_type: str, seed: str, frac: str = None, gpu_id=None):
     """Ejecuta el entrenamiento y genera un archivo de salida."""
+    print(f"[DEBUG] Tarea run_training en proceso... {model_type} - seed {seed}")
     output_files = []
     results_folder = os.path.join(RESULTS_FOLDER, model_type)
     if frac:
@@ -144,6 +145,7 @@ def run_training(model_type: str, seed: str, frac: str = None, gpu_id=None):
             f"encodings_layer-04_seed-{int(seed):02d}.pkl"
         )
         output_files = [output_1, output_2, output_3]
+
     elif ("reactome") in model_type:
         output_2 = os.path.join(results_folder,
                 f"encodings_layer-01_seed-{int(seed):02d}.pkl"
@@ -165,7 +167,7 @@ def run_training(model_type: str, seed: str, frac: str = None, gpu_id=None):
         )
         output_files = [output_1, output_2, output_3, output_4]
 
-    print(f"Tarea run_training completada: {model_type} - seed {seed}")
+    print(f"[DEBUG] Tarea run_training completada: {model_type} - seed {seed}")
 
     return output_files  # Devuelve la ruta del archivo generado
 
@@ -352,7 +354,7 @@ def main_flow(results_folder: str = RESULTS_FOLDER):
 
 
     # Training
-    seeds_run = []
+    tasks_to_run = []
     for index, (model, seed) in enumerate(itertools.product(models, SEEDS)):
         if "random" in model:
             model_, frac = model.split("-")
@@ -374,6 +376,7 @@ def main_flow(results_folder: str = RESULTS_FOLDER):
                 f"encodings_layer-04_seed-{int(seed):02d}.pkl"
             )
             output_files = [output_1, output_2, output_3]
+
         elif ("reactome") in model_:
             output_2 = os.path.join(results_folder,
                     f"encodings_layer-01_seed-{int(seed):02d}.pkl"
@@ -403,13 +406,11 @@ def main_flow(results_folder: str = RESULTS_FOLDER):
         )
 
         if task_future:  # Solo añadimos tareas que se ejecutan
-            seeds_run.append(task_future)
+            tasks_to_run.append(task_future)
 
-    wait(seeds_run)  # Espera a todas las tareas enviadas
 
 
     # Scoring
-    models_scoring = []
     for index, model in enumerate(models):
         if "random" in model:
             model_, frac = model.split("-")
@@ -435,14 +436,10 @@ def main_flow(results_folder: str = RESULTS_FOLDER):
         )
 
         if task_future:  # Solo añadimos tareas que se ejecutan
-            models_scoring.append(task_future)
-
-    # Esperamos que todas las tareas de scoring se completen
-    wait(models_scoring)
+            tasks_to_run.append(task_future)
 
 
     # Analyze results
-    results_analisis = []
     results_folder = os.path.join(RESULTS_FOLDER)
     fname_informed = f"informed.tex"
     fname_clustering = f"clustering.tex"
@@ -456,10 +453,10 @@ def main_flow(results_folder: str = RESULTS_FOLDER):
         analyze_results, FRAC_START, FRAC_STEP, FRAC_STOP, gpu_id=index % N_GPU, output_files=output_files
     )
     if task_future:  # Solo añadimos tareas que se ejecutan
-        results_analisis.append(task_future)
+        tasks_to_run.append(task_future)
 
     # Esperamos que todas las tareas de scoring se completen
-    wait(results_analisis)
+    wait(tasks_to_run)
     
     # Give time to shutdown connections
     time.sleep(2) 
