@@ -338,6 +338,7 @@ def main_flow(results_folder: str = RESULTS_FOLDER):
     install_ivae(results_folder=results_folder)
 
     models = [f"ivae_random-{frac}" for frac in FRACS] + ["ivae_kegg", "ivae_reactome"]
+    print("[DEBUG] Modelos generados:", models) 
 
     folders = []
     for model in models:
@@ -396,11 +397,12 @@ def main_flow(results_folder: str = RESULTS_FOLDER):
 
 
         # Solo ejecuta la tarea si falta el archivo
+        print(f"[DEBUG] Comprobando archivos esperados para {model_} con frac={frac}: {output_files}")
         task_future = execute_if_file_missing(
             run_training, model_, seed, frac, gpu_id=index % N_GPU, output_files=output_files
         )
 
-        if task_future:  # Asegurar que solo añadimos tareas que realmente se ejecutaron
+        if task_future:  # Solo añadimos tareas que se ejecutan
             seeds_run.append(task_future)
 
     wait(seeds_run)  # Espera a todas las tareas enviadas
