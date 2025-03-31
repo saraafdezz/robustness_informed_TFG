@@ -5,6 +5,7 @@ import time
 import numpy as np
 import hashlib
 from datetime import datetime
+import json
 
 from dotenv import load_dotenv, find_dotenv
 from prefect import flow, task
@@ -12,6 +13,7 @@ from prefect.cache_policies import INPUTS, TASK_SOURCE
 from prefect.futures import wait
 from prefect.task_runners import ThreadPoolTaskRunner
 from prefect_shell import ShellOperation
+
 
 
 def check_cli_arg_is_bool(arg):
@@ -66,17 +68,6 @@ FRACS = [str(round(x, 10)) for x in fracsAux]
 
 seedsAux = range(int(SEED_START), int(SEED_STOP) + 1, int(SEED_STEP))
 SEEDS = [str(x) for x in seedsAux]
-
-# --- For launching only necessary tasks ---
-
-def file_hash(filepath):
-    """Devuelve un hash del contenido del archivo para detectar cambios."""
-    if not os.path.exists(filepath):
-        return None
-    hasher = hashlib.md5()
-    with open(filepath, "rb") as f:
-        hasher.update(f.read())
-    return hasher.hexdigest()
 
 
 # --- Tasks ---
@@ -298,34 +289,87 @@ def analyze_results(frac_start: str, frac_step: str, frac_stop: str, gpu_id=None
 
 # --- Funciones auxiliares
 
-def execute_if_file_missing(task, *args, output_files=None, **kwargs):
+def execute_if_file_missing(task, task_name, *args, output_files=None, **kwargs):
     """
     Ejecuta la tarea si los archivos de salida no existen.
     """
     if output_files is None:
         output_files = []
 
+    # Verificar si los scripts han sido modificados
+    script_path = TASK_SCRIPT_MAP.get(task_name)
+    script_hashes = load_script_hashes()
+    script_changed = False
+
+    if script_path:
+        current_hash = calculate_file_hash(script_path)
+        previous_hash = script_hashes.get(script_path)
+
+        if current_hash != previous_hash:
+            print(f"[DEBUG] Script cambiado: {script_path}. Se ejecutará la tarea.")
+            script_hashes[script_path] = current_hash
+            script_changed = True
+        else:
+            print(f"[DEBUG] Script sin cambios: {script_path}")
+
+
     # Verificar si faltan archivos
     missing_files = [file for file in output_files if not os.path.exists(file)]
     
-    # Si hay archivos faltantes, ejecutamos la tarea
-    if missing_files:
+    # Si hay archivos faltantes o scripts modificados, ejecutamos la tarea
+    if missing_files or script_changed:
         print(f"Archivos faltantes detectados: {missing_files}. Ejecutando la tarea...")
         
         # Llamamos a submit() para lanzar la tarea
         task_future = task.submit(*args, **kwargs)
         print(f"Estado de la tarea después de enviar: {task_future.state}")
-        task_future.result()  # Esto puede darte más información sobre la ejecución
+        task_future.result()  # Esto puede dar más información sobre la ejecución
 
-        
+        # Guardar nuevos hashes si se ejecutó la tarea
+        save_script_hashes(script_hashes)
+
         # Asegurarnos de que la tarea se ha lanzado correctamente
         if task_future:
             print(f"Tarea enviada para el modelo {args[0]}")
         return task_future
     else:
-        print(f"Todos los archivos existen: {output_files}. No se ejecuta la tarea.")
+        print(f"Todos los archivos existen y el script no cambió: {output_files}. No se ejecuta la tarea.")
         return None
 
+# --- For checking if a script changes ---
+
+HASH_FILE = "script_hashes.json"
+
+# Calculate hash
+def calculate_file_hash(filepath):
+    """Devuelve un hash del contenido del archivo para detectar cambios."""
+    if not os.path.exists(filepath):
+        return None
+    hasher = hashlib.md5()
+    with open(filepath, "rb") as f:
+        hasher.update(f.read())
+    return hasher.hexdigest()
+
+# Load hash
+def load_script_hashes():
+    """Carga los hashes previos desde un archivo JSON."""
+    if os.path.exists(HASH_FILE):
+        with open(HASH_FILE, "r") as f:
+            return json.load(f)
+    return {}
+
+# Save hash
+def save_script_hashes(hashes):
+    """Guarda los hashes actualizados en un archivo JSON."""
+    with open(HASH_FILE, "w") as f:
+        json.dump(hashes, f, indent=4)
+
+# Mapping tasks and scripts
+TASK_SCRIPT_MAP = {
+    "run_training": "notebooks/00-train.py",
+    "score_training": "notebooks/01-scoring.py",
+    "analyze_results": "notebooks/02-analyze_results.py",
+}
 
 
 # --- Flows ---
@@ -402,7 +446,7 @@ def main_flow(results_folder: str = RESULTS_FOLDER):
         # Solo ejecuta la tarea si falta el archivo
         print(f"[DEBUG] Comprobando archivos esperados para {model_} con frac={frac}: {output_files}")
         task_future = execute_if_file_missing(
-            run_training, model_, seed, frac, gpu_id=index % N_GPU, output_files=output_files
+            run_training, "run_training", model_, seed, frac, gpu_id=index % N_GPU, output_files=output_files
         )
 
         if task_future:  # Solo añadimos tareas que se ejecutan
@@ -432,7 +476,7 @@ def main_flow(results_folder: str = RESULTS_FOLDER):
 
         # Solo ejecuta la tarea si faltan los archivos de scoring
         task_future = execute_if_file_missing(
-            score_training, model_, SEED_START, SEED_STEP, SEED_STOP, frac, gpu_id=index % N_GPU, output_files=output_files
+            score_training, "score_training", model_, SEED_START, SEED_STEP, SEED_STOP, frac, gpu_id=index % N_GPU, output_files=output_files
         )
 
         if task_future:  # Solo añadimos tareas que se ejecutan
@@ -450,7 +494,7 @@ def main_flow(results_folder: str = RESULTS_FOLDER):
                     layer_scores, mse]
     # Solo ejecuta la tarea si faltan los archivos de scoring
     task_future = execute_if_file_missing(
-        analyze_results, FRAC_START, FRAC_STEP, FRAC_STOP, gpu_id=index % N_GPU, output_files=output_files
+        analyze_results, "analyze_results", FRAC_START, FRAC_STEP, FRAC_STOP, gpu_id=index % N_GPU, output_files=output_files
     )
     if task_future:  # Solo añadimos tareas que se ejecutan
         tasks_to_run.append(task_future)

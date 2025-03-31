@@ -38,7 +38,6 @@ from isrobust_TFG.datasets import load_kang
 # # Asegurar que PyTorch usa la GPU correcta
 # torch.cuda.set_device(int(gpu_id))
 # device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
 # print(f"Usando GPU {gpu_id}")
 
 if __name__ == "__main__":
