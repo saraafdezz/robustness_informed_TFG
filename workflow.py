@@ -94,8 +94,8 @@ def create_folders(model_type: str, frac: str = None):
     return
 
 
-
-@task(cache_policy=TASK_SOURCE, retries=3, retry_delay_seconds=2)
+# Run training
+@task(cache_expiration=None, retries=3, retry_delay_seconds=2)
 def run_training(model_type: str, seed: str, frac: str = None, gpu_id=None):
     """Ejecuta el entrenamiento y genera un archivo de salida."""
     print(f"[DEBUG] Tarea run_training en proceso... {model_type} - seed {seed}")
@@ -165,7 +165,7 @@ def run_training(model_type: str, seed: str, frac: str = None, gpu_id=None):
 
 
 # Task for scoring
-@task(cache_policy=TASK_SOURCE, retries=3, retry_delay_seconds=2)
+@task(cache_expiration=None, retries=3, retry_delay_seconds=2)
 def score_training(model_type: str, seed_start: str, seed_step: str, seed_stop: str, frac: str = None, gpu_id=None):
     """Runs the training script for a given model type, seed, and optionally fraction.
     Which GPU to use is also passed as an argument."""
@@ -236,7 +236,7 @@ def score_training(model_type: str, seed_start: str, seed_step: str, seed_stop: 
 # Task for analyze
 
 @task(
-    cache_policy=TASK_SOURCE, retries=3, retry_delay_seconds=2
+    cache_expiration=None, retries=3, retry_delay_seconds=2
 )
 def analyze_results(frac_start: str, frac_step: str, frac_stop: str, gpu_id=None):
     """Runs the training script for a given model type, seed, and optionally fraction.
