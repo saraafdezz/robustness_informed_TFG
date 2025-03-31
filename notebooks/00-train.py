@@ -35,6 +35,7 @@ from isrobust_TFG.datasets import load_kang
 # # Leer la GPU asignada por Snakemake
 # gpu_id = os.environ.get("CUDA_VISIBLE_DEVICES", "0")
 
+
 # # Asegurar que PyTorch usa la GPU correcta
 # torch.cuda.set_device(int(gpu_id))
 # device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
