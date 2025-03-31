@@ -6,6 +6,7 @@ import numpy as np
 import hashlib
 from datetime import datetime
 import json
+import torch
 
 from dotenv import load_dotenv, find_dotenv
 from prefect import flow, task
@@ -13,7 +14,6 @@ from prefect.cache_policies import INPUTS, TASK_SOURCE
 from prefect.futures import wait
 from prefect.task_runners import ThreadPoolTaskRunner
 from prefect_shell import ShellOperation
-
 
 
 def check_cli_arg_is_bool(arg):
@@ -93,6 +93,14 @@ def create_folders(model_type: str, frac: str = None):
 
     return
 
+@task
+def check_cuda():
+    import os
+    import torch
+    print("CUDA_VISIBLE_DEVICES:", os.getenv("CUDA_VISIBLE_DEVICES"))
+    print("GPUs detectadas:", torch.cuda.device_count())
+
+
 
 # Run training
 @task(cache_expiration=None, retries=3, retry_delay_seconds=2)
@@ -126,8 +134,9 @@ def run_training(model_type: str, seed: str, frac: str = None, gpu_id=None):
 
     ShellOperation(
         commands=[" ".join(command)],
-        env={**os.environ, "CUDA_VISIBLE_DEVICES": str(gpu_id)},
+        env={**os.environ, "CUDA_VISIBLE_DEVICES": ",".join(map(str, range(N_GPU)))},
     ).run()
+
     if ("random") in model_type:
         output_2 = os.path.join(results_folder,
                 f"encodings_layer-01_seed-{int(seed):02d}.pkl"
@@ -203,13 +212,8 @@ def score_training(model_type: str, seed_start: str, seed_step: str, seed_stop: 
         command.extend(["--frac", str(frac)])
 
     ShellOperation(
-        commands=[
-            " ".join(command),  # Join command and redirect.
-        ],
-        env={
-            **os.environ,
-            "CUDA_VISIBLE_DEVICES": str(gpu_id),
-        },  # Set CUDA_VISIBLE_DEVICES
+        commands=[" ".join(command)],
+        env={**os.environ, "CUDA_VISIBLE_DEVICES": ",".join(map(str, range(N_GPU)))},
     ).run()
 
     # Archivos de salida esperados.
@@ -266,13 +270,8 @@ def analyze_results(frac_start: str, frac_step: str, frac_stop: str, gpu_id=None
     print("*" * 20, DEBUG)
 
     ShellOperation(
-        commands=[
-            " ".join(command),  # Join command and redirect.
-        ],
-        env={
-            **os.environ,
-            "CUDA_VISIBLE_DEVICES": str(gpu_id),
-        },  # Set CUDA_VISIBLE_DEVICES
+        commands=[" ".join(command)],
+        env={**os.environ, "CUDA_VISIBLE_DEVICES": ",".join(map(str, range(N_GPU)))},
     ).run()
 
     # create outputs
@@ -381,6 +380,11 @@ TASK_SCRIPT_MAP = {
 def main_flow(results_folder: str = RESULTS_FOLDER):
     """Main workflow to install dependencies and run training for different models."""
 
+    # For GPU distribution
+    print("CUDA available:", torch.cuda.is_available())
+    print("Num GPUs:", torch.cuda.device_count())
+    print("N_GPU:", os.getenv("N_GPU"))
+    check_cuda()
     install_ivae(results_folder=results_folder)
 
     models = [f"ivae_random-{frac}" for frac in FRACS] + ["ivae_kegg", "ivae_reactome"]
