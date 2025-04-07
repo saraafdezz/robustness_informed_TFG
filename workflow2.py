@@ -134,7 +134,7 @@ def run_training(model_type: str, seed: str, frac: str = None, gpu_id=None):
 
     ShellOperation(
         commands=[" ".join(command)],
-        env={**os.environ, "CUDA_VISIBLE_DEVICES": ",".join(map(str, range(N_GPU)))},
+        env={**os.environ, "CUDA_VISIBLE_DEVICES": str(gpu_id)},
     ).run()
 
     if ("random") in model_type:
@@ -213,7 +213,7 @@ def score_training(model_type: str, seed_start: str, seed_step: str, seed_stop: 
 
     ShellOperation(
         commands=[" ".join(command)],
-        env={**os.environ, "CUDA_VISIBLE_DEVICES": ",".join(map(str, range(N_GPU)))},
+        env={**os.environ, "CUDA_VISIBLE_DEVICES": str(gpu_id)},
     ).run()
 
     # Archivos de salida esperados.
@@ -271,7 +271,7 @@ def analyze_results(frac_start: str, frac_step: str, frac_stop: str, gpu_id=None
 
     ShellOperation(
         commands=[" ".join(command)],
-        env={**os.environ, "CUDA_VISIBLE_DEVICES": ",".join(map(str, range(N_GPU)))},
+        env={**os.environ, "CUDA_VISIBLE_DEVICES": str(gpu_id)},
     ).run()
 
     # create outputs
@@ -283,6 +283,23 @@ def analyze_results(frac_start: str, frac_step: str, frac_stop: str, gpu_id=None
     output_files = [fname_informed, fname_clustering, model_mse,
                 layer_scores, mse]
     return output_files
+
+@task
+def should_run_task(output_files: list[str], script_path: str):
+    """Determina si se debe ejecutar una tarea."""
+    script_hashes = load_script_hashes()
+    missing_files = [f for f in output_files if not os.path.exists(f)]
+    changed = False
+
+    if script_path:
+        current_hash = calculate_file_hash(script_path)
+        previous_hash = script_hashes.get(script_path)
+        if current_hash != previous_hash:
+            script_hashes[script_path] = current_hash
+            changed = True
+            save_script_hashes(script_hashes)
+
+    return len(missing_files) > 0 or changed
 
 
 
@@ -370,15 +387,12 @@ TASK_SCRIPT_MAP = {
 
 
 # --- Flows ---
-
-
 @flow(
     name="IVAE Training Workflow", task_runner=ThreadPoolTaskRunner(max_workers=N_DEVICES)
-)  # Give the flow a name
+)
 def main_flow(results_folder: str = RESULTS_FOLDER):
     """Main workflow to install dependencies and run training for different models."""
 
-    # For GPU distribution
     print("CUDA available:", torch.cuda.is_available())
     print("Num GPUs:", torch.cuda.device_count())
     print("N_GPU:", os.getenv("N_GPU"))
@@ -386,7 +400,7 @@ def main_flow(results_folder: str = RESULTS_FOLDER):
     install_ivae(results_folder=results_folder)
 
     models = [f"ivae_random-{frac}" for frac in FRACS] + ["ivae_kegg", "ivae_reactome"]
-    print("[DEBUG] Modelos generados:", models) 
+    print("[DEBUG] Modelos generados:", models)
 
     folders = []
     for model in models:
@@ -395,117 +409,120 @@ def main_flow(results_folder: str = RESULTS_FOLDER):
         else:
             frac = None
             model_ = model
-        create_folders.submit(model_, frac)
+        folders.append(create_folders.submit(model_, frac))
     wait(folders)
 
-
-    # Training
     tasks_to_run = []
+
+    # --- TRAINING ---
     for index, (model, seed) in enumerate(itertools.product(models, SEEDS)):
         if "random" in model:
             model_, frac = model.split("-")
         else:
-            frac = None
-            model_ = model
+            model_, frac = model, None
 
-        # Definir la ruta esperada del archivo de salida
+        results_folder_model = os.path.join(RESULTS_FOLDER, model_ if not frac else f"{model_}-{frac}")
         output_files = []
-        results_folder = os.path.join(RESULTS_FOLDER, model_)
-        if frac:
-            results_folder = os.path.join(RESULTS_FOLDER, f"{model_}-{frac}")
-        output_1 = os.path.join(results_folder, f"metrics-seed-{int(seed):02d}.pkl")
-        if ("random") in model_:
-            output_2 = os.path.join(results_folder,
-                    f"encodings_layer-01_seed-{int(seed):02d}.pkl"
-                )
-            output_3 = os.path.join(results_folder,
-                f"encodings_layer-04_seed-{int(seed):02d}.pkl"
-            )
-            output_files = [output_1, output_2, output_3]
 
-        elif ("reactome") in model_:
-            output_2 = os.path.join(results_folder,
-                    f"encodings_layer-01_seed-{int(seed):02d}.pkl"
-                )
-            output_3 = os.path.join(results_folder,
-                f"encodings_layer-04_seed-{int(seed):02d}.pkl"
-            )
-            output_files = [output_1, output_2, output_3]
+        output_1 = os.path.join(results_folder_model, f"metrics-seed-{int(seed):02d}.pkl")
 
-        elif ("kegg") in model_:
-            output_2 = os.path.join(results_folder,
-                    f"encodings_layer-01_seed-{int(seed):02d}.pkl"
-                )
-            output_3 = os.path.join(results_folder,
-                f"encodings_layer-02_seed-{int(seed):02d}.pkl"
-            )
-            output_4 = os.path.join(results_folder,
-                f"encodings_layer-05_seed-{int(seed):02d}.pkl"
-            )
+        if "random" in model_ or "reactome" in model_:
+            output_2 = os.path.join(results_folder_model, f"encodings_layer-01_seed-{int(seed):02d}.pkl")
+            output_3 = os.path.join(results_folder_model, f"encodings_layer-04_seed-{int(seed):02d}.pkl")
+            output_files = [output_1, output_2, output_3]
+        elif "kegg" in model_:
+            output_2 = os.path.join(results_folder_model, f"encodings_layer-01_seed-{int(seed):02d}.pkl")
+            output_3 = os.path.join(results_folder_model, f"encodings_layer-02_seed-{int(seed):02d}.pkl")
+            output_4 = os.path.join(results_folder_model, f"encodings_layer-05_seed-{int(seed):02d}.pkl")
             output_files = [output_1, output_2, output_3, output_4]
+        else:
+            output_files = [output_1]
 
+        script_path = TASK_SCRIPT_MAP["run_training"]
+        script_hashes = load_script_hashes()
+        current_hash = calculate_file_hash(script_path)
+        previous_hash = script_hashes.get(script_path)
+        script_changed = current_hash != previous_hash
 
-        # Solo ejecuta la tarea si falta el archivo
-        print(f"[DEBUG] Comprobando archivos esperados para {model_} con frac={frac}: {output_files}")
-        task_future = execute_if_file_missing(
-            run_training, "run_training", model_, seed, frac, gpu_id=index % N_GPU, output_files=output_files
-        )
+        missing_files = [f for f in output_files if not os.path.exists(f)]
+        if missing_files or script_changed:
+            if script_changed:
+                script_hashes[script_path] = current_hash
+                save_script_hashes(script_hashes)
+                print(f"[DEBUG] Script modificado: {script_path}")
 
-        if task_future:  # Solo añadimos tareas que se ejecutan
-            tasks_to_run.append(task_future)
+            print(f"[DEBUG] Lanzando entrenamiento: {model_}, seed={seed}, frac={frac}")
+            tasks_to_run.append(
+                run_training.submit(model_, seed, frac, gpu_id=index % N_GPU)
+            )
+        else:
+            print(f"[DEBUG] Skipping entrenamiento {model_}, seed={seed}, frac={frac} (archivos ya existen)")
 
-
-
-    # Scoring
+    # --- SCORING ---
     for index, model in enumerate(models):
         if "random" in model:
             model_, frac = model.split("-")
             base_path = os.path.join(RESULTS_FOLDER, f"{model_}-{frac}")
         else:
-            frac = None
-            model_ = model
+            model_, frac = model, None
             base_path = os.path.join(RESULTS_FOLDER, model_)
 
-        # Definir los archivos de salida esperados
-        fname_informed = f"scores_informed.pkl"
-        fname_clustering = f"scores_clustering.pkl"
-        fname_metrics = f"scores_metrics.pkl"
-        output_files =  [
-            os.path.join(base_path, fname_informed),
-            os.path.join(base_path, fname_clustering),
-            os.path.join(base_path, fname_metrics),
+        output_files = [
+            os.path.join(base_path, "scores_informed.pkl"),
+            os.path.join(base_path, "scores_clustering.pkl"),
+            os.path.join(base_path, "scores_metrics.pkl"),
         ]
 
-        # Solo ejecuta la tarea si faltan los archivos de scoring
-        task_future = execute_if_file_missing(
-            score_training, "score_training", model_, SEED_START, SEED_STEP, SEED_STOP, frac, gpu_id=index % N_GPU, output_files=output_files
+        script_path = TASK_SCRIPT_MAP["score_training"]
+        script_hashes = load_script_hashes()
+        current_hash = calculate_file_hash(script_path)
+        previous_hash = script_hashes.get(script_path)
+        script_changed = current_hash != previous_hash
+
+        missing_files = [f for f in output_files if not os.path.exists(f)]
+        if missing_files or script_changed:
+            if script_changed:
+                script_hashes[script_path] = current_hash
+                save_script_hashes(script_hashes)
+                print(f"[DEBUG] Script modificado: {script_path}")
+
+            print(f"[DEBUG] Lanzando scoring: {model_}, frac={frac}")
+            tasks_to_run.append(
+                score_training.submit(model_, SEED_START, SEED_STEP, SEED_STOP, frac, gpu_id=index % N_GPU)
+            )
+        else:
+            print(f"[DEBUG] Skipping scoring {model_}, frac={frac} (archivos ya existen)")
+
+    # --- ANALYZE ---
+    output_files = [
+        "informed.tex",
+        "clustering.tex",
+        "model_mse.pdf",
+        "layer_scores.pdf",
+        "mse.tex",
+    ]
+    script_path = TASK_SCRIPT_MAP["analyze_results"]
+    script_hashes = load_script_hashes()
+    current_hash = calculate_file_hash(script_path)
+    previous_hash = script_hashes.get(script_path)
+    script_changed = current_hash != previous_hash
+    missing_files = [f for f in output_files if not os.path.exists(f)]
+
+    if missing_files or script_changed:
+        if script_changed:
+            script_hashes[script_path] = current_hash
+            save_script_hashes(script_hashes)
+            print(f"[DEBUG] Script modificado: {script_path}")
+
+        print("[DEBUG] Lanzando análisis final")
+        tasks_to_run.append(
+            analyze_results.submit(FRAC_START, FRAC_STEP, FRAC_STOP, gpu_id=0)
         )
+    else:
+        print("[DEBUG] Skipping análisis final (archivos ya existen)")
 
-        if task_future:  # Solo añadimos tareas que se ejecutan
-            tasks_to_run.append(task_future)
-
-
-    # Analyze results
-    results_folder = os.path.join(RESULTS_FOLDER)
-    fname_informed = f"informed.tex"
-    fname_clustering = f"clustering.tex"
-    model_mse = f"model_mse.pdf"
-    layer_scores = f"layer_scores.pdf"
-    mse = f"mse.tex"
-    output_files = [fname_informed, fname_clustering, model_mse,
-                    layer_scores, mse]
-    # Solo ejecuta la tarea si faltan los archivos de scoring
-    task_future = execute_if_file_missing(
-        analyze_results, "analyze_results", FRAC_START, FRAC_STEP, FRAC_STOP, gpu_id=index % N_GPU, output_files=output_files
-    )
-    if task_future:  # Solo añadimos tareas que se ejecutan
-        tasks_to_run.append(task_future)
-
-    # Esperamos que todas las tareas de scoring se completen
     wait(tasks_to_run)
-    
-    # Give time to shutdown connections
-    time.sleep(2) 
+    time.sleep(2)
 
 
 
