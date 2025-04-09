@@ -14,6 +14,9 @@ from prefect.cache_policies import INPUTS, TASK_SOURCE
 from prefect.futures import wait
 from prefect.task_runners import ThreadPoolTaskRunner
 from prefect_shell import ShellOperation
+from concurrent.futures import ThreadPoolExecutor, as_completed
+import tensorflow as tf
+
 
 
 def check_cli_arg_is_bool(arg):
@@ -95,24 +98,112 @@ def create_folders(model_type: str, frac: str = None):
 
 @task
 def check_cuda():
-    import os
-    import torch
-    print("CUDA_VISIBLE_DEVICES:", os.getenv("CUDA_VISIBLE_DEVICES"))
-    print("GPUs detectadas:", torch.cuda.device_count())
+    print("[check_cuda] CUDA_VISIBLE_DEVICES:", os.getenv("CUDA_VISIBLE_DEVICES"))
+    print("[check_cuda] GPUs detectadas:", tf.config.experimental.list_physical_devices('GPU'))
+    time.sleep(5)
 
 
 
-# Run training
+# # Run training
+# @task(cache_expiration=None, retries=3, retry_delay_seconds=2)
+# def run_training(model_type: str, seed: str, frac: str = None, gpu_id: list = []):
+#     """Ejecuta el entrenamiento y genera un archivo de salida."""
+#     print(f"[DEBUG] Tarea run_training en proceso... {model_type} - seed {seed}")
+#     output_files = []
+#     results_folder = os.path.join(RESULTS_FOLDER, model_type)
+#     if frac:
+#         results_folder = os.path.join(RESULTS_FOLDER, f"{model_type}-{frac}")
+
+#     output_1 = os.path.join(results_folder, f"metrics-seed-{int(seed):02d}.pkl")
+#     command = [
+#         "pixi",
+#         "run",
+#         "--environment",
+#         "ivaecuda",
+#         "python",
+#         "notebooks/00-train.py",
+#         "--model_kind", model_type,
+#         "--seed", str(seed),
+#         "--results_path_model", results_folder,
+#         "--data_path",
+#         DATA_PATH,
+#     ]
+
+#     if DEBUG:
+#         command.extend(["--debug", str(DEBUG)])
+#     if frac:
+#         command.extend(["--frac", str(frac)])
+
+#     ShellOperation(
+#         commands=[" ".join(command)],
+#         env={**os.environ, "CUDA_VISIBLE_DEVICES": str(gpu_id)},
+#     ).run()
+
+#     if ("random") in model_type:
+#         output_2 = os.path.join(results_folder,
+#                 f"encodings_layer-01_seed-{int(seed):02d}.pkl"
+#             )
+#         output_3 = os.path.join(results_folder,
+#             f"encodings_layer-04_seed-{int(seed):02d}.pkl"
+#         )
+#         output_files = [output_1, output_2, output_3]
+
+#     elif ("reactome") in model_type:
+#         output_2 = os.path.join(results_folder,
+#                 f"encodings_layer-01_seed-{int(seed):02d}.pkl"
+#             )
+#         output_3 = os.path.join(results_folder,
+#             f"encodings_layer-04_seed-{int(seed):02d}.pkl"
+#         )
+#         output_files = [output_1, output_2, output_3]
+
+#     elif ("kegg") in model_type:
+#         output_2 = os.path.join(results_folder,
+#                 f"encodings_layer-01_seed-{int(seed):02d}.pkl"
+#             )
+#         output_3 = os.path.join(results_folder,
+#             f"encodings_layer-02_seed-{int(seed):02d}.pkl"
+#         )
+#         output_4 = os.path.join(results_folder,
+#             f"encodings_layer-05_seed-{int(seed):02d}.pkl"
+#         )
+#         output_files = [output_1, output_2, output_3, output_4]
+
+#     print(f"[DEBUG] Tarea run_training completada: {model_type} - seed {seed}")
+
+#     return output_files  # Devuelve la ruta del archivo generado
+
+# Run training with torchrun across multiple GPUs
 @task(cache_expiration=None, retries=3, retry_delay_seconds=2)
-def run_training(model_type: str, seed: str, frac: str = None, gpu_id=None):
-    """Ejecuta el entrenamiento y genera un archivo de salida."""
+def run_training(model_type: str, seed: str, frac: str = None, gpu_ids: list = []):
+    """Ejecuta el entrenamiento distribuido y genera archivos de salida."""
     print(f"[DEBUG] Tarea run_training en proceso... {model_type} - seed {seed}")
     output_files = []
     results_folder = os.path.join(RESULTS_FOLDER, model_type)
     if frac:
         results_folder = os.path.join(RESULTS_FOLDER, f"{model_type}-{frac}")
 
+    # Format GPU list and number of processes
+    visible_devices = ",".join(map(str, gpu_ids))
+    num_procs = len(gpu_ids)
+
     output_1 = os.path.join(results_folder, f"metrics-seed-{int(seed):02d}.pkl")
+
+    # Build distributed command using torchrun
+    # command = [
+    #     "pixi",
+    #     "run",
+    #     "--environment",
+    #     "ivaecuda",
+    #     "torchrun",
+    #     "--nproc_per_node", str(num_procs),
+    #     "notebooks/00-train.py",
+    #     "--model_kind", model_type,
+    #     "--seed", str(seed),
+    #     "--results_path_model", results_folder,
+    #     "--data_path", DATA_PATH,
+    # ]
+
     command = [
         "pixi",
         "run",
@@ -123,8 +214,7 @@ def run_training(model_type: str, seed: str, frac: str = None, gpu_id=None):
         "--model_kind", model_type,
         "--seed", str(seed),
         "--results_path_model", results_folder,
-        "--data_path",
-        DATA_PATH,
+        "--data_path", DATA_PATH,
     ]
 
     if DEBUG:
@@ -132,46 +222,26 @@ def run_training(model_type: str, seed: str, frac: str = None, gpu_id=None):
     if frac:
         command.extend(["--frac", str(frac)])
 
+    # Run the distributed training command
     ShellOperation(
         commands=[" ".join(command)],
-        env={**os.environ, "CUDA_VISIBLE_DEVICES": str(gpu_id)},
+        env={**os.environ, "CUDA_VISIBLE_DEVICES": visible_devices},
     ).run()
 
-    if ("random") in model_type:
-        output_2 = os.path.join(results_folder,
-                f"encodings_layer-01_seed-{int(seed):02d}.pkl"
-            )
-        output_3 = os.path.join(results_folder,
-            f"encodings_layer-04_seed-{int(seed):02d}.pkl"
-        )
+    # Collect output file paths depending on model_type
+    if "random" in model_type or "reactome" in model_type:
+        output_2 = os.path.join(results_folder, f"encodings_layer-01_seed-{int(seed):02d}.pkl")
+        output_3 = os.path.join(results_folder, f"encodings_layer-04_seed-{int(seed):02d}.pkl")
         output_files = [output_1, output_2, output_3]
 
-    elif ("reactome") in model_type:
-        output_2 = os.path.join(results_folder,
-                f"encodings_layer-01_seed-{int(seed):02d}.pkl"
-            )
-        output_3 = os.path.join(results_folder,
-            f"encodings_layer-04_seed-{int(seed):02d}.pkl"
-        )
-        output_files = [output_1, output_2, output_3]
-
-    elif ("kegg") in model_type:
-        output_2 = os.path.join(results_folder,
-                f"encodings_layer-01_seed-{int(seed):02d}.pkl"
-            )
-        output_3 = os.path.join(results_folder,
-            f"encodings_layer-02_seed-{int(seed):02d}.pkl"
-        )
-        output_4 = os.path.join(results_folder,
-            f"encodings_layer-05_seed-{int(seed):02d}.pkl"
-        )
+    elif "kegg" in model_type:
+        output_2 = os.path.join(results_folder, f"encodings_layer-01_seed-{int(seed):02d}.pkl")
+        output_3 = os.path.join(results_folder, f"encodings_layer-02_seed-{int(seed):02d}.pkl")
+        output_4 = os.path.join(results_folder, f"encodings_layer-05_seed-{int(seed):02d}.pkl")
         output_files = [output_1, output_2, output_3, output_4]
 
     print(f"[DEBUG] Tarea run_training completada: {model_type} - seed {seed}")
-
-    return output_files  # Devuelve la ruta del archivo generado
-
-
+    return output_files
 
 # Task for scoring
 @task(cache_expiration=None, retries=3, retry_delay_seconds=2)
@@ -414,10 +484,13 @@ TASK_SCRIPT_MAP = {
 
 
 # --- Flows ---
-@flow(name="IVAE Training Workflow", task_runner=ThreadPoolTaskRunner(max_workers=N_DEVICES))
+@flow(
+    name="IVAE Training Workflow", task_runner=ThreadPoolTaskRunner(max_workers=N_DEVICES)
+)
 def main_flow(results_folder: str = RESULTS_FOLDER):
-    print("CUDA disponible:", torch.cuda.is_available())
-    print("GPUs detectadas:", torch.cuda.device_count())
+    print("[main_flow] CUDA disponible:", torch.cuda.is_available())
+    print("[main_flow] GPUs detectadas:", torch.cuda.device_count())
+    time.sleep(5)
     check_cuda()
     install_ivae(results_folder=results_folder)
 
@@ -460,8 +533,13 @@ def main_flow(results_folder: str = RESULTS_FOLDER):
                 os.path.join(results_folder_model, f"encodings_layer-05_seed-{int(seed):02d}.pkl"),
             ]
 
-        if should_run_task("run_training", output_files):
-            tasks_to_run.append(run_training.submit(model_, seed, frac, gpu_id=index % N_GPU))
+        if should_run_task(task_name = "run_training", output_files = output_files):
+            tasks_to_run.append(
+                run_training.submit(
+                    model_, seed, frac, gpu_ids = [index%N_GPU]
+                )
+                # model_, seed, frac, gpu_ids = list(range(N_GPU))
+            )
 
     # ---------- SCORING ----------
     for index, model in enumerate(models):

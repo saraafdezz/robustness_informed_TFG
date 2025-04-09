@@ -2,6 +2,7 @@ import os
 
 os.environ["KERAS_BACKEND"] = "tensorflow"
 import keras
+import time
 import tensorflow as tf
 from keras import ops, regularizers
 from keras.layers import Dense, Input, Layer
@@ -45,7 +46,7 @@ class Sampling(Layer):
         z_mean, z_log_var = inputs
         batch = ops.shape(z_mean)[0]
         dim = ops.shape(z_mean)[1]
-        epsilon = keras.random.normal(
+        epsilon = tf.random.normal(
             shape=(batch, dim), mean=0.0, stddev=0.1
         )  # , seed=self.seed_generator
         return z_mean + ops.exp(0.5 * z_log_var) * epsilon

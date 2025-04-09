@@ -42,6 +42,7 @@ torch = ">=2.6.0, <3"
 [feature.tools.dependencies]
 prefect = "*"
 prefect-dask = "*"
+cuda = ">=12.1, <12.2"
 
 [feature.tools.pypi-dependencies]
 prefect-shell = "*"
@@ -49,6 +50,10 @@ prefect-shell = "*"
 [feature.ivaecuda]
 system-requirements = {cuda = "12"}
 dependencies = {cuda = ">=12.1, <12.2"}
+tasks = {isgpu = "pixi run python -c 'import tensorflow as tf; print(tf.test.is_gpu_available())' --cuda"}
+
+[feature.tools]
+system-requirements = {cuda = "12"}
 tasks = {isgpu = "pixi run python -c 'import tensorflow as tf; print(tf.test.is_gpu_available())' --cuda"}
 
 [environments]
