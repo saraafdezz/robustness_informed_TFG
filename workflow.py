@@ -99,7 +99,8 @@ def create_folders(model_type: str, frac: str = None):
 @task
 def check_cuda():
     print("[check_cuda] CUDA_VISIBLE_DEVICES:", os.getenv("CUDA_VISIBLE_DEVICES"))
-    print("[check_cuda] GPUs detectadas:", tf.config.experimental.list_physical_devices('GPU'))
+    print("[check_cuda] GPUs fisicas detectadas:", tf.config.experimental.list_physical_devices('GPU'))
+    print("[check_cuda] GPUs logicas detectadas:", tf.config.list_logical_devices('GPU'))
     time.sleep(5)
 
 
@@ -536,9 +537,9 @@ def main_flow(results_folder: str = RESULTS_FOLDER):
         if should_run_task(task_name = "run_training", output_files = output_files):
             tasks_to_run.append(
                 run_training.submit(
-                    model_, seed, frac, gpu_ids = [index%N_GPU]
+                    model_, seed, frac, gpu_ids = list(range(N_GPU))
                 )
-                # model_, seed, frac, gpu_ids = list(range(N_GPU))
+                # model_, seed, frac, gpu_ids = [index%N_GPU]
             )
 
     # ---------- SCORING ----------

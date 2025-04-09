@@ -26,10 +26,13 @@ class VAELoss(Layer):
         inputs, outputs, z_mean, z_log_sigma = inputs
         reconstruction_loss = tf.reduce_mean(tf.square(inputs - outputs))
         reconstruction_loss *= self.input_dim
-        kl_loss = 1 + z_log_sigma - ops.square(z_mean) - ops.exp(z_log_sigma)
-        kl_loss = ops.sum(kl_loss, axis=-1)
+        #MODIFIED
+        z_log_var = tf.clip_by_value(z_log_sigma, -3, 3)
+
+        kl_loss = 1 + z_log_var - tf.square(z_mean) - tf.exp(z_log_var)
+        kl_loss = tf.reduce_mean(kl_loss, axis=-1)
         kl_loss *= -0.5
-        vae_loss = ops.mean(reconstruction_loss + kl_loss)
+        vae_loss = tf.reduce_mean(reconstruction_loss + kl_loss)
         self.add_loss(vae_loss)
         return outputs
 
@@ -44,12 +47,16 @@ class Sampling(Layer):
 
     def call(self, inputs):
         z_mean, z_log_var = inputs
-        batch = ops.shape(z_mean)[0]
-        dim = ops.shape(z_mean)[1]
+        batch = tf.shape(z_mean)[0]
+        dim = tf.shape(z_mean)[1]
+
+        # Modified
+        z_log_var = tf.clip_by_value(z_log_var, -3, 3)
+
         epsilon = tf.random.normal(
             shape=(batch, dim), mean=0.0, stddev=0.1
         )  # , seed=self.seed_generator
-        return z_mean + ops.exp(0.5 * z_log_var) * epsilon
+        return z_mean + tf.exp(0.5 * z_log_var) * epsilon
 
 
 class InformedVAE:
@@ -122,7 +129,8 @@ class InformedVAE:
         vae_outputs = VAELoss(self.input_dim)([inputs, outputs, z_mean, z_log_sigma])
         vae = Model(inputs, vae_outputs, name="vae_mlp")
         vae.summary()
-        vae.compile(optimizer=Adam(learning_rate=self.learning_rate), metrics=["mse"])
+        optimizer = Adam(learning_rate=self.learning_rate, clipvalue=3.0)
+        vae.compile(optimizer=optimizer, metrics=["mse"])
 
         self.vae = vae
         self.encoder = encoder

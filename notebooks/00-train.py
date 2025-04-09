@@ -43,6 +43,7 @@ from isrobust_TFG.datasets import load_kang
 # print(f"Usando GPU {gpu_id}")
 
 if __name__ == "__main__":
+    tf.keras.mixed_precision.set_global_policy('float32')
 
     parser = argparse.ArgumentParser(description="Train with a specific model")
     parser.add_argument(
@@ -87,17 +88,24 @@ if __name__ == "__main__":
     ####################################################################################
     # Define Mirrored Strategy
     ####################################################################################
-    gpus=tf.config.experimental.list_physical_devices('GPU')
+    fis_gpus = tf.config.experimental.list_physical_devices('GPU')
+    for gpu in fis_gpus:
+        tf.config.experimental.set_memory_growth(gpu, True)
+
+    gpus=tf.config.list_logical_devices('GPU')
     print("#"*50)
     print(f"[DEBUG][00-train.py] GPU's availables: {gpus}")
-    for gpu in gpus:
-        tf.config.experimental.set_memory_growth(gpu, True)
+    
+    strategy = tf.distribute.MirroredStrategy(
+        gpus,
+        cross_device_ops=tf.distribute.ReductionToOneDevice()
+        )
     print("WAIT")
     time.sleep(5)
-    strategy = tf.distribute.MirroredStrategy()
     print("#"*50)
     print(f"[INFO] Number of devices: {strategy.num_replicas_in_sync}")
     print("#"*50)
+    time.sleep(5)
 
     if debug:
         N_EPOCHS = 2
@@ -176,12 +184,13 @@ if __name__ == "__main__":
             adjacency_names=adj_name,
             adjacency_activation=adj_activ,
             seed=seed,
+            learning_rate=1e-6
         )
         vae._build_vae()
 
     ###################################################################################
     n_gpus = len(gpus)
-    batch_size = 33
+    batch_size = 150
     steps_per_epoch = x_train.shape[0]//batch_size
     validation_steps = x_test.shape[0]//batch_size
     ####################################################################################
@@ -199,14 +208,14 @@ if __name__ == "__main__":
     val_dataset = tf.data.Dataset.from_tensor_slices((x_test, x_test))
     val_dataset = val_dataset.batch(batch_size, drop_remainder=True)
 
-
+    tf.debugging.enable_check_numerics()
     history = vae.fit(  # Entrena
         train_dataset,
         # x_train,
         # x_train,
         shuffle=True,
         verbose=1,
-        epochs=1,
+        epochs=3,
         # batch_size=batch_size,
         steps_per_epoch=steps_per_epoch,
         callbacks=[callback],
