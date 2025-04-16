@@ -75,13 +75,13 @@ RESULTS_FOLDER = os.getenv("RESULTS_FOLDER", "results")
 N_GPU = int(os.getenv("N_GPU", "3"))
 N_CPU = int(os.getenv("N_CPU", "4"))
 DEBUG = check_cli_arg_is_bool(os.getenv("DEBUG", "1"))
-DATA_PATH = os.getenv("DATA_PATH", "data")  # add data path
+DATA_PATH = os.getenv("DATA_PATH", "data")
 N_CPUS_CLUSTERING = max(1, N_CPU - 2 * N_GPU)
 N_DEVICES = N_GPU if N_GPU > 0 else (N_CPU - 1)
 
 print("*" * 20, N_DEVICES, N_CPU, os.getenv("DEBUG"), DEBUG)
 print("*" * 20, os.getenv("PREFECT_RESULTS_PERSIST_BY_DEFAULT"))
-
+print(DATA_PATH)
 
 # As in the makefile
 fracsAux = np.arange(float(FRAC_START), float(FRAC_STOP), float(FRAC_STEP))
