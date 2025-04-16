@@ -1,22 +1,40 @@
 import itertools
-import os
-import subprocess
-import time
-import numpy as np
-import hashlib
-from datetime import datetime
-import json
-import torch
 
-from dotenv import load_dotenv, find_dotenv
-from prefect import flow, task
+import os
+import time
+from multiprocessing import cpu_count
+from pathlib import Path
+
+import numpy as np
+import pandas as pd
+import scanpy as sc
+from dotenv import find_dotenv, load_dotenv
+from keras import callbacks
+from keras.models import Model
+from prefect import flow, get_run_logger, task, unmapped
 from prefect.cache_policies import INPUTS, TASK_SOURCE
 from prefect.futures import wait
-from prefect.task_runners import ThreadPoolTaskRunner
+from prefect_ray import RayTaskRunner
+from prefect_ray.context import remote_options
 from prefect_shell import ShellOperation
-from concurrent.futures import ThreadPoolExecutor, as_completed
-import tensorflow as tf
+from scipy.stats import weightedtau
+from sklearn.cluster import MiniBatchKMeans
+from sklearn.metrics.cluster import adjusted_mutual_info_score
+from sklearn.preprocessing import minmax_scale
 
+from ivae.bio import (
+    InformedModelConfig,
+    IvaeResults,
+    ModelFamilyResults,
+    build_model_config,
+    get_activations,
+    get_importances,
+    train_val_test_split,
+)
+from ivae.models import (
+    InformedVAE,
+)  
+from ivae.datasets import load_kang
 
 
 def check_cli_arg_is_bool(arg):
@@ -44,7 +62,7 @@ def check_cli_arg_is_bool(arg):
 
 
 # --- Load Environment Variables ---
-print("*"*20, find_dotenv())
+print("*" * 20, find_dotenv())
 load_dotenv()
 
 FRAC_START = os.getenv("FRAC_START", "0.1")
@@ -57,11 +75,11 @@ RESULTS_FOLDER = os.getenv("RESULTS_FOLDER", "results")
 N_GPU = int(os.getenv("N_GPU", "3"))
 N_CPU = int(os.getenv("N_CPU", "4"))
 DEBUG = check_cli_arg_is_bool(os.getenv("DEBUG", "1"))
-DATA_PATH = os.getenv("DATA_PATH", "data/data_pathsingle")  # add data path
+DATA_PATH = os.getenv("DATA_PATH", "data")  # add data path
+N_CPUS_CLUSTERING = max(1, N_CPU - 2 * N_GPU)
+N_DEVICES = N_GPU if N_GPU > 0 else (N_CPU - 1)
 
-N_DEVICES = N_GPU if N_GPU > 0 else (N_CPU -1)
-
-print("*" * 20, N_CPU, os.getenv("DEBUG"), DEBUG)
+print("*" * 20, N_DEVICES, N_CPU, os.getenv("DEBUG"), DEBUG)
 print("*" * 20, os.getenv("PREFECT_RESULTS_PERSIST_BY_DEFAULT"))
 
 
@@ -70,22 +88,23 @@ fracsAux = np.arange(float(FRAC_START), float(FRAC_STOP), float(FRAC_STEP))
 FRACS = [str(round(x, 10)) for x in fracsAux]
 
 seedsAux = range(int(SEED_START), int(SEED_STOP) + 1, int(SEED_STEP))
-SEEDS = [str(x) for x in seedsAux]
+SEEDS = [int(x) for x in seedsAux]
 
 
-# --- Tasks ---
+MODELS = [f"ivae_random-{frac}" for frac in FRACS] + ["ivae_kegg", "ivae_reactome"]
+MODELS = ["ivae_kegg", "ivae_reactome", "ivae_random-0.1"]
 
 
-@task(cache_policy=TASK_SOURCE)
+@task(cache_policy=TASK_SOURCE + INPUTS)
 def install_ivae(results_folder: str = RESULTS_FOLDER):
     """Installs dependencies using pixi."""
     os.makedirs(f"{results_folder}/logs", exist_ok=True)
-    ShellOperation(commands=["pixi install -e ivaecuda"], working_dir=".").run()
+    ShellOperation(commands=["pixi install -a"], working_dir=".").run()
 
     return
 
 
-@task(cache_policy=TASK_SOURCE)
+@task(cache_policy=TASK_SOURCE + INPUTS)
 def create_folders(model_type: str, frac: str = None):
     """Creates folders for a given model type, seed, and optionally fraction."""
     results_folder = os.path.join(RESULTS_FOLDER, model_type)
@@ -96,486 +115,618 @@ def create_folders(model_type: str, frac: str = None):
 
     return
 
-@task
-def check_cuda():
-    print("[check_cuda] CUDA_VISIBLE_DEVICES:", os.getenv("CUDA_VISIBLE_DEVICES"))
-    print("[check_cuda] GPUs fisicas detectadas:", tf.config.experimental.list_physical_devices('GPU'))
-    print("[check_cuda] GPUs logicas detectadas:", tf.config.list_logical_devices('GPU'))
-    time.sleep(5)
+
+@task(cache_policy=TASK_SOURCE + INPUTS)
+def download_data(data_path: str = DATA_PATH) -> sc.AnnData:
+    """Downloads data from a given path."""
+
+    data = load_kang(data_folder=data_path, normalize=True, n_genes=None)
+    return data
 
 
-
-# # Run training
-# @task(cache_expiration=None, retries=3, retry_delay_seconds=2)
-# def run_training(model_type: str, seed: str, frac: str = None, gpu_id: list = []):
-#     """Ejecuta el entrenamiento y genera un archivo de salida."""
-#     print(f"[DEBUG] Tarea run_training en proceso... {model_type} - seed {seed}")
-#     output_files = []
-#     results_folder = os.path.join(RESULTS_FOLDER, model_type)
-#     if frac:
-#         results_folder = os.path.join(RESULTS_FOLDER, f"{model_type}-{frac}")
-
-#     output_1 = os.path.join(results_folder, f"metrics-seed-{int(seed):02d}.pkl")
-#     command = [
-#         "pixi",
-#         "run",
-#         "--environment",
-#         "ivaecuda",
-#         "python",
-#         "notebooks/00-train.py",
-#         "--model_kind", model_type,
-#         "--seed", str(seed),
-#         "--results_path_model", results_folder,
-#         "--data_path",
-#         DATA_PATH,
-#     ]
-
-#     if DEBUG:
-#         command.extend(["--debug", str(DEBUG)])
-#     if frac:
-#         command.extend(["--frac", str(frac)])
-
-#     ShellOperation(
-#         commands=[" ".join(command)],
-#         env={**os.environ, "CUDA_VISIBLE_DEVICES": str(gpu_id)},
-#     ).run()
-
-#     if ("random") in model_type:
-#         output_2 = os.path.join(results_folder,
-#                 f"encodings_layer-01_seed-{int(seed):02d}.pkl"
-#             )
-#         output_3 = os.path.join(results_folder,
-#             f"encodings_layer-04_seed-{int(seed):02d}.pkl"
-#         )
-#         output_files = [output_1, output_2, output_3]
-
-#     elif ("reactome") in model_type:
-#         output_2 = os.path.join(results_folder,
-#                 f"encodings_layer-01_seed-{int(seed):02d}.pkl"
-#             )
-#         output_3 = os.path.join(results_folder,
-#             f"encodings_layer-04_seed-{int(seed):02d}.pkl"
-#         )
-#         output_files = [output_1, output_2, output_3]
-
-#     elif ("kegg") in model_type:
-#         output_2 = os.path.join(results_folder,
-#                 f"encodings_layer-01_seed-{int(seed):02d}.pkl"
-#             )
-#         output_3 = os.path.join(results_folder,
-#             f"encodings_layer-02_seed-{int(seed):02d}.pkl"
-#         )
-#         output_4 = os.path.join(results_folder,
-#             f"encodings_layer-05_seed-{int(seed):02d}.pkl"
-#         )
-#         output_files = [output_1, output_2, output_3, output_4]
-
-#     print(f"[DEBUG] Tarea run_training completada: {model_type} - seed {seed}")
-
-#     return output_files  # Devuelve la ruta del archivo generado
-
-# Run training with torchrun across multiple GPUs
-@task(cache_expiration=None, retries=3, retry_delay_seconds=2)
-def run_training(model_type: str, seed: str, frac: str = None, gpu_ids: list = []):
-    """Ejecuta el entrenamiento distribuido y genera archivos de salida."""
-    print(f"[DEBUG] Tarea run_training en proceso... {model_type} - seed {seed}")
-    output_files = []
-    results_folder = os.path.join(RESULTS_FOLDER, model_type)
-    if frac:
-        results_folder = os.path.join(RESULTS_FOLDER, f"{model_type}-{frac}")
-
-    # Format GPU list and number of processes
-    visible_devices = ",".join(map(str, gpu_ids))
-    num_procs = len(gpu_ids)
-
-    output_1 = os.path.join(results_folder, f"metrics-seed-{int(seed):02d}.pkl")
-
-    # Build distributed command using torchrun
-    # command = [
-    #     "pixi",
-    #     "run",
-    #     "--environment",
-    #     "ivaecuda",
-    #     "torchrun",
-    #     "--nproc_per_node", str(num_procs),
-    #     "notebooks/00-train.py",
-    #     "--model_kind", model_type,
-    #     "--seed", str(seed),
-    #     "--results_path_model", results_folder,
-    #     "--data_path", DATA_PATH,
-    # ]
-
-    command = [
-        "pixi",
-        "run",
-        "--environment",
-        "ivaecuda",
-        "python",
-        "notebooks/00-train.py",
-        "--model_kind", model_type,
-        "--seed", str(seed),
-        "--results_path_model", results_folder,
-        "--data_path", DATA_PATH,
-    ]
-
-    if DEBUG:
-        command.extend(["--debug", str(DEBUG)])
-    if frac:
-        command.extend(["--frac", str(frac)])
-
-    # Run the distributed training command
-    ShellOperation(
-        commands=[" ".join(command)],
-        env={**os.environ, "CUDA_VISIBLE_DEVICES": visible_devices},
-    ).run()
-
-    # Collect output file paths depending on model_type
-    if "random" in model_type or "reactome" in model_type:
-        output_2 = os.path.join(results_folder, f"encodings_layer-01_seed-{int(seed):02d}.pkl")
-        output_3 = os.path.join(results_folder, f"encodings_layer-04_seed-{int(seed):02d}.pkl")
-        output_files = [output_1, output_2, output_3]
-
-    elif "kegg" in model_type:
-        output_2 = os.path.join(results_folder, f"encodings_layer-01_seed-{int(seed):02d}.pkl")
-        output_3 = os.path.join(results_folder, f"encodings_layer-02_seed-{int(seed):02d}.pkl")
-        output_4 = os.path.join(results_folder, f"encodings_layer-05_seed-{int(seed):02d}.pkl")
-        output_files = [output_1, output_2, output_3, output_4]
-
-    print(f"[DEBUG] Tarea run_training completada: {model_type} - seed {seed}")
-    return output_files
-
-# Task for scoring
-@task(cache_expiration=None, retries=3, retry_delay_seconds=2)
-def score_training(model_type: str, seed_start: str, seed_step: str, seed_stop: str, frac: str = None, gpu_id=None):
-    """Runs the training script for a given model type, seed, and optionally fraction.
-    Which GPU to use is also passed as an argument."""
-    # TODO: adapt to only CPUs scenarios
-
-    print(f"Ejecutando scoring para el modelo {model_type}...")
-    results_folder = os.path.join(RESULTS_FOLDER)
-
-    command = [
-        "pixi",
-        "run",
-        "--environment",
-        "ivaecuda",
-        "python",
-        "notebooks/01-scoring.py",
-        "--model_kind",
-        model_type,
-        "--seed_start",
-        str(seed_start),
-        "--seed_step",
-        str(seed_step),
-        "--seed_stop",
-        str(seed_stop),
-        "--results_path",
-        results_folder,
-        "--data_path",
-        DATA_PATH,
-    ]
-
-    print("*" * 20, DEBUG)
-
-    if DEBUG:
-        command.extend(["--debug", str(DEBUG)])
-    if frac:
-        command.extend(["--frac", str(frac)])
-
-    ShellOperation(
-        commands=[" ".join(command)],
-        env={**os.environ, "CUDA_VISIBLE_DEVICES": str(gpu_id)},
-    ).run()
-
-    # Archivos de salida esperados.
-    fname_informed = f"scores_informed.pkl"
-    fname_clustering = f"scores_clustering.pkl"
-    fname_metrics = f"scores_metrics.pkl"
-
-    # Rutas finales de los archivos generados.
-    if "random" in model_type:
-        base_path = os.path.join(RESULTS_FOLDER, f"{model_type}-{frac}")
+@task(cache_policy=TASK_SOURCE + INPUTS)
+def build_ivae_config(model_kind, data) -> InformedModelConfig:
+    if "random" in model_kind:
+        model, frac = model_kind.split("-")
+        frac = float(frac)
     else:
-        base_path = os.path.join(RESULTS_FOLDER, model_type)
+        frac = None
+        model = model_kind
 
-    print(f"Tarea scoring_training completada: {model_type}")
-
-    output_files = [
-        os.path.join(base_path, fname_informed),
-        os.path.join(base_path, fname_clustering),
-        os.path.join(base_path, fname_metrics),
-    ]
-
-    return output_files
-
-# Task for analyze
-
-@task(
-    cache_expiration=None, retries=3, retry_delay_seconds=2
-)
-def analyze_results(frac_start: str, frac_step: str, frac_stop: str, gpu_id=None):
-    """Runs the training script for a given model type, seed, and optionally fraction.
-    Which GPU to use is also passed as an argument."""
-    # TODO: adapt to only CPUs scenarios
-
-    results_folder = os.path.join(RESULTS_FOLDER)
-    command = [
-        "pixi",
-        "run",
-        "--environment",
-        "ivaecuda",
-        "python",
-        "notebooks/02-analyze_results.py",
-        "--frac_start",
-        str(frac_start),
-        "--frac_step",
-        str(frac_step),
-        "--frac_stop",
-        str(frac_stop),
-        "--results_path",
-        results_folder,
-        "--data_path",
-        DATA_PATH,
-    ]
-
-    print("*" * 20, DEBUG)
-
-    ShellOperation(
-        commands=[" ".join(command)],
-        env={**os.environ, "CUDA_VISIBLE_DEVICES": str(gpu_id)},
-    ).run()
-
-    # create outputs
-    fname_informed = f"informed.tex"
-    fname_clustering = f"clustering.tex"
-    model_mse = f"model_mse.pdf"
-    layer_scores = f"layer_scores.pdf"
-    mse = f"mse.tex"
-    output_files = [fname_informed, fname_clustering, model_mse,
-                layer_scores, mse]
-    return output_files
+    model_config = build_model_config(
+        data,
+        model_kind=model,
+        frac=frac,
+    )
+    return model_config
 
 
-@task
-def should_run_task(output_files: list[str], script_path: str):
-    """Determina si se debe ejecutar una tarea."""
-    script_hashes = load_script_hashes()
-    missing_files = [f for f in output_files if not os.path.exists(f)]
-    changed = False
+def split_data(
+    seed: int,
+    data: sc.AnnData,
+) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    """Splits data into train, validation, and test sets."""
 
-    if script_path:
-        current_hash = calculate_file_hash(script_path)
-        previous_hash = script_hashes.get(script_path)
-        if current_hash != previous_hash:
-            script_hashes[script_path] = current_hash
-            changed = True
-            save_script_hashes(script_hashes)
+    obs = data.obs.copy()  # Ignorar
+    x_trans = data.to_df()  # Ignorar
 
-    return len(missing_files) > 0 or changed
+    # Separa en train, val y test los datos de x_trans
+    x_train, x_val, x_test = train_val_test_split(
+        x_trans.apply(minmax_scale),  # Para que los datos esten en un rango similar
+        val_size=0.20,
+        test_size=0.20,
+        stratify=obs["cell_type"].astype(str) + obs["condition"].astype(str),
+        seed=seed,
+    )
 
-
-
-# --- Funciones auxiliares
-def should_run_task(task_name, output_files=None):
-    if output_files is None:
-        output_files = []
-
-    script_path = TASK_SCRIPT_MAP.get(task_name)
-    script_hashes = load_script_hashes()
-    script_changed = False
-
-    if script_path:
-        current_hash = calculate_file_hash(script_path)
-        previous_hash = script_hashes.get(script_path)
-        if current_hash != previous_hash:
-            print(f"[DEBUG] Script cambiado: {script_path}. Se ejecutará la tarea.")
-            script_hashes[script_path] = current_hash
-            script_changed = True
-        else:
-            print(f"[DEBUG] Script sin cambios: {script_path}")
-
-    missing_files = [file for file in output_files if not os.path.exists(file)]
-    should_run = bool(missing_files or script_changed)
-
-    if should_run:
-        save_script_hashes(script_hashes)
-
-    return should_run
+    return x_train, x_val, x_test
 
 
-def execute_if_file_missing(task, task_name, *args, output_files=None, **kwargs):
+def gen_fit_key(context, parameters) -> str:
     """
-    Ejecuta la tarea si los archivos de salida no existen.
+    Generates a cache key incorporating fields from model_config and the rest of the signature.
     """
-    if output_files is None:
-        output_files = []
+    model_config = parameters["model_config"]
+    seed = parameters["seed"]
 
-    # Verificar si los scripts han sido modificados
-    script_path = TASK_SCRIPT_MAP.get(task_name)
-    script_hashes = load_script_hashes()
-    script_changed = False
+    model_kind = model_config.model_kind
+    if "random" in model_kind:
+        model_kind = f"{model_kind}_{model_config.frac}"
 
-    if script_path:
-        current_hash = calculate_file_hash(script_path)
-        previous_hash = script_hashes.get(script_path)
+    seed_part = f"seed={seed}"
 
-        if current_hash != previous_hash:
-            print(f"[DEBUG] Script cambiado: {script_path}. Se ejecutará la tarea.")
-            script_hashes[script_path] = current_hash
-            script_changed = True
+    return f"model_fit_{model_kind}_{seed_part}"
+
+
+@task(cache_key_fn=gen_fit_key, cache_policy=TASK_SOURCE + INPUTS)
+def fit_model(model_config, seed, data) -> IvaeResults:
+    """Fits the model to the data."""
+
+    split = split_data(seed, data)
+
+    N_EPOCHS = 3 if DEBUG else 100
+
+    x_train, x_val, x_test = split
+    x_train = x_train.loc[:, model_config.input_genes]
+    x_val = x_val.loc[:, model_config.input_genes]
+    x_test = x_test.loc[:, model_config.input_genes]
+
+    # Build and train the VAE
+    model = InformedVAE(
+        adjacency_matrices=model_config.model_layer,
+        adjacency_names=model_config.adj_name,
+        adjacency_activation=model_config.adj_activ,
+        seed=0,
+    )
+
+    model._build_vae()
+    batch_size = 32
+
+    callback = callbacks.EarlyStopping(
+        monitor="val_loss",
+        min_delta=1e-1,
+        patience=100,
+        verbose=0,
+    )
+
+    history = model.fit(
+        x_train,
+        x_train,
+        shuffle=True,
+        verbose=1,
+        epochs=N_EPOCHS,
+        batch_size=batch_size,
+        callbacks=[callback],
+        validation_data=(x_val, x_val),
+    )
+
+    evals = evaluate_model(model, model_config, split, seed)
+    encodings = predict_encodings(model, model_config, split, seed, data)
+
+    results = IvaeResults(
+        config=model_config,
+        history=history.history,
+        eval=evals,
+        encodings=encodings,
+    )
+
+    return results
+
+
+def evaluate_model(model, model_config, split, seed):
+    """Evaluates the model."""
+    x_train, x_val, x_test = split
+    x_train = x_train.loc[:, model_config.input_genes]
+    x_val = x_val.loc[:, model_config.input_genes]
+    x_test = x_test.loc[:, model_config.input_genes]
+
+    evaluation = {}
+    evaluation["train"] = model.evaluate(
+        x_train, model.predict(x_train), verbose=0, return_dict=True
+    )
+    evaluation["val"] = model.evaluate(
+        x_val, model.predict(x_val), verbose=0, return_dict=True
+    )
+    evaluation["test"] = model.evaluate(
+        x_test, model.predict(x_test), verbose=0, return_dict=True
+    )
+
+    eval_results = (
+        pd.DataFrame.from_dict(evaluation)
+        .reset_index(names="metric")
+        .assign(seed=seed)
+        .melt(
+            id_vars=["seed", "metric"],
+            value_vars=["train", "val", "test"],
+            var_name="split",
+            value_name="score",
+        )
+        .assign(model=model_config.model_kind)
+    )
+
+    return eval_results
+
+
+def predict_encodings(model, model_config, split, seed, data):
+    """Gets the activations of the model."""
+    x_train, x_val, x_test = split
+    x_train = x_train.loc[:, model_config.input_genes]
+    x_val = x_val.loc[:, model_config.input_genes]
+    x_test = x_test.loc[:, model_config.input_genes]
+    x_trans = pd.concat([x_train, x_val, x_test], axis=0)
+
+    layer_outputs = [layer.output for layer in model.encoder.layers]
+    activation_model = Model(inputs=model.encoder.input, outputs=layer_outputs)
+
+    encodings = []
+
+    for layer_id in range(1, len(layer_outputs)):
+        if layer_id == (len(layer_outputs) - 1):
+            n_latents = len(model_config.layer_entity_names[-1]) // 2
+            colnames = [f"latent_{i}" for i in range(n_latents)]
+            layer = "funnel"
+        elif "kegg" in model_config.model_kind:
+            if layer_id in [1, 2]:
+                colnames = model_config.layer_entity_names[layer_id - 1]
+                layer = model_config.adj_name[layer_id - 1]
+            else:
+                continue
+        elif (
+            "reactome" in model_config.model_kind or "random" in model_config.model_kind
+        ):
+            if layer_id in [1]:
+                colnames = model_config.layer_entity_names[layer_id - 1]
+                layer = model_config.adj_name[layer_id - 1]
+            else:
+                continue
         else:
-            print(f"[DEBUG] Script sin cambios: {script_path}")
+            colnames = model_config.layer_entity_names[layer_id - 1]
+            layer = model_config.adj_name[layer_id - 1]
+
+        encodings_i = get_activations(
+            act_model=activation_model,
+            layer_id=layer_id,
+            data=x_trans,
+        )
+
+        encodings_i = pd.DataFrame(encodings_i, index=x_trans.index, columns=colnames)
+
+        encodings_i["split"] = "train"
+        encodings_i.loc[x_val.index, "split"] = "val"
+        encodings_i.loc[x_test.index, "split"] = "test"
+        encodings_i["layer"] = layer
+        encodings_i["seed"] = seed
+        encodings_i["model"] = model_config.model_kind
+
+        encodings_i = encodings_i.merge(
+            data.obs[["cell_type", "condition"]],
+            how="left",
+            left_index=True,
+            right_index=True,
+        )
+
+        encodings.append(encodings_i)
+
+    return encodings
 
 
-    # Verificar si faltan archivos
-    missing_files = [file for file in output_files if not os.path.exists(file)]
-    
-    # Si hay archivos faltantes o scripts modificados, ejecutamos la tarea
-    if missing_files or script_changed:
-        print(f"Archivos faltantes detectados: {missing_files}. Ejecutando la tarea...")
-        
-        # Llamamos a submit() para lanzar la tarea
-        task_future = task.submit(*args, **kwargs)
+@task(cache_policy=TASK_SOURCE + INPUTS)
+def evalute_clustering(results, seed) -> pd.DataFrame:
+    logger = get_run_logger()  # Moved inside
+    logger.info(f"Evaluating clustering for (seed={seed})...")
 
-        # Guardar nuevos hashes si se ejecutó la tarea
-        save_script_hashes(script_hashes)
+    non_layer_names = ["split", "layer", "seed", "cell_type", "condition", "model"]
+    clust_scores = {}
 
-        # Asegurarnos de que la tarea se ha lanzado correctamente
-        if task_future:
-            print(f"Tarea enviada para el modelo {args[0]}")
-        return task_future
-    else:
-        print(f"Todos los archivos existen y el script no cambió: {output_files}. No se ejecuta la tarea.")
-        return None
+    batch_size = 256 * cpu_count() + 1
 
-# --- For checking if a script changes ---
+    model_kind = results.config.model_kind
 
-HASH_FILE = "script_hashes.json"
+    for results_layer in results.encodings:
+        layer = results_layer["layer"].iloc[0]
 
-# Calculate hash
-def calculate_file_hash(filepath):
-    """Devuelve un hash del contenido del archivo para detectar cambios."""
-    if not os.path.exists(filepath):
-        return None
-    hasher = hashlib.md5()
-    with open(filepath, "rb") as f:
-        hasher.update(f.read())
-    return hasher.hexdigest()
+        train_embeddings = results_layer.loc[
+            (results_layer["split"] == "train")
+            & (results_layer["condition"] == "control")
+        ]
+        val_embeddings = results_layer.loc[
+            (results_layer["split"] == "val")
+            & (results_layer["condition"] == "control")
+        ]
+        test_embeddings = results_layer.loc[
+            (results_layer["split"] == "test")
+            & (results_layer["condition"] == "control")
+        ]
 
-# Load hash
-def load_script_hashes():
-    """Carga los hashes previos desde un archivo JSON."""
-    if os.path.exists(HASH_FILE):
-        with open(HASH_FILE, "r") as f:
-            return json.load(f)
-    return {}
+        y_train = train_embeddings["cell_type"]
+        y_val = val_embeddings["cell_type"]
+        y_test = test_embeddings["cell_type"]
 
-# Save hash
-def save_script_hashes(hashes):
-    """Guarda los hashes actualizados en un archivo JSON."""
-    with open(HASH_FILE, "w") as f:
-        json.dump(hashes, f, indent=4)
+        train_embeddings = train_embeddings.drop(columns=non_layer_names)
+        val_embeddings = val_embeddings.drop(columns=non_layer_names)
+        test_embeddings = test_embeddings.drop(columns=non_layer_names)
 
-# Mapping tasks and scripts
-TASK_SCRIPT_MAP = {
-    "run_training": "notebooks/00-train.py",
-    "score_training": "notebooks/01-scoring.py",
-    "analyze_results": "notebooks/02-analyze_results.py",
-}
+        clust_scores[layer] = {}
+        clust_scores[layer]["train"] = []
+        clust_scores[layer]["val"] = []
+        clust_scores[layer]["test"] = []
+
+        model = MiniBatchKMeans(n_clusters=y_train.nunique(), batch_size=batch_size)
+        model.fit(train_embeddings)
+        clust_scores[layer]["train"].append(
+            adjusted_mutual_info_score(y_train, model.labels_)
+        )
+        clust_scores[layer]["val"].append(
+            adjusted_mutual_info_score(y_val, model.predict(val_embeddings))
+        )
+        clust_scores[layer]["test"].append(
+            adjusted_mutual_info_score(y_test, model.predict(test_embeddings))
+        )
+
+    clust_scores = (
+        pd.DataFrame.from_dict(clust_scores)
+        .melt(var_name="layer", value_name="score", ignore_index=False)
+        .reset_index(names=["split"])
+        .explode("score")
+    )
+    clust_scores["score"] = clust_scores["score"].astype("float")
+    clust_scores["model"] = model_kind
+
+    return clust_scores
 
 
-# --- Flows ---
+@task(cache_policy=TASK_SOURCE + INPUTS)
+def gather_results(model_config, results_lst):
+    """Gathers all result futures for each model_config."""
+
+    model_kind = model_config.model_kind
+    family_results = []
+    for result in results_lst:
+        if model_kind == result.config.model_kind:
+            family_results.append(result)
+    results_by_model = ModelFamilyResults(model_kind, family_results)
+
+    return results_by_model
+
+
+@task(cache_policy=TASK_SOURCE + INPUTS)
+def compute_consistedness(family_results):
+    """Compute consistency of the results."""
+    # Implement the logic to compute consistency
+    non_layer_names = ["split", "layer", "seed", "cell_type", "condition", "model"]
+    scores = {}
+    model_kind = family_results.results[0].config.model_kind
+
+    n_results = len(family_results)
+    n_encoding_layers = len(family_results.results[0].encodings)
+    for i in range(n_encoding_layers):
+        layer_id = family_results.results[0].encodings[i]["layer"].iloc[0]
+        scores[layer_id] = {}
+
+        for split in ["train", "test", "val"]:
+            # encodings_i = [x.loc[x["split"] == split].drop(non_layer_names, axis=1) for r in results for x in r.encodings[i]]
+            scores[layer_id][split] = []
+            for j in range(n_results):
+                r_j = family_results.results[j].encodings[i]
+                encodings_j = r_j.loc[r_j["split"] == split].drop(
+                    non_layer_names, axis=1
+                )
+                importances_j = get_importances(data=encodings_j, abs=True)
+                for k in range(j + 1, n_results):
+                    r_k = family_results.results[k].encodings[i]
+                    encodings_k = r_k.loc[r_k["split"] == split].drop(
+                        non_layer_names, axis=1
+                    )
+                    importances_k = get_importances(data=encodings_k, abs=True)
+                    scores[layer_id][split].append(
+                        weightedtau(importances_j, importances_k)[0]
+                    )
+
+    scores_df = (
+        pd.DataFrame.from_dict(scores)
+        .melt(var_name="layer", value_name="score", ignore_index=False)
+        .reset_index(names=["split"])
+        .explode("score")
+    )
+    scores_df["score"] = scores_df["score"].astype("float")
+    scores_df["model"] = model_kind
+
+    return scores_df
+
+
+@task(cache_policy=TASK_SOURCE + INPUTS)
+def build_eval_df(results_by_model):
+    """Builds a dataframe with the evaluation metrics."""
+    df = pd.concat(
+        [i.eval.drop(columns=["seed"]) for r in results_by_model for i in r.results],
+        axis=0,
+        ignore_index=True,
+    )
+
+    return df
+
+
+@task(cache_policy=TASK_SOURCE + INPUTS)
+def save_eval(df, output_path):
+    import seaborn as sns
+
+    fname = "eval_mse"
+
+    df.to_csv(Path(output_path).joinpath("eval.tsv"), index=False, sep="\t")
+
+    (
+        df.query("metric=='mse'")
+        .groupby(["model", "metric", "split"])["score"]
+        .describe()
+        .drop(["count", "min", "max"], axis=1)
+        .to_latex(
+            Path(output_path).joinpath(f"{fname}_summary.tex"),
+            bold_rows=True,
+            escape=True,
+        )
+    )
+
+    metric_scores_to_plot = df.copy().query("split=='test'").query("metric=='mse'")
+    metric_scores_to_plot["metric"] = r"$-\mathrm{log}(\mathrm{MSE})$"
+    metric_scores_to_plot["score"] = -np.log(metric_scores_to_plot["score"])
+    metric_scores_to_plot = metric_scores_to_plot.rename(
+        columns={"score": "Score", "model": "Model"}
+    )
+
+    custom_params = {"axes.spines.right": False, "axes.spines.top": False}
+    sns.set_theme(context="paper", font_scale=2, style="ticks", rc=custom_params)
+    fac = 0.7
+
+    g = sns.catplot(
+        data=metric_scores_to_plot,
+        kind="violin",
+        col="metric",
+        height=9 * fac,
+        aspect=16 / 9 * fac,
+        sharey=True,
+        sharex=False,
+        y="Model",
+        x="Score",
+        split=False,
+        cut=0,
+        fill=False,
+        density_norm="count",
+        inner="quart",
+        linewidth=2,
+        legend_out=False,
+        col_wrap=4,
+    )
+
+    g.savefig(
+        Path(output_path).joinpath(f"{fname}_violin_test.pdf"), bbox_inches="tight"
+    )
+    g.savefig(
+        Path(output_path).joinpath(f"{fname}_violin_test.png"),
+        dpi=300,
+        bbox_inches="tight",
+    )
+
+
+@task(cache_policy=TASK_SOURCE + INPUTS)
+def build_clustering_df(clustering_results):
+    """Builds a dataframe with the evaluation metrics."""
+    df = pd.concat(clustering_results, axis=0, ignore_index=True)
+    df["metric"] = "mutual_info"
+
+    return df
+
+
+@task(cache_policy=TASK_SOURCE + INPUTS)
+def save_clustering(df, output_path):
+    import seaborn as sns
+
+    fname = "clustering"
+
+    df["metric"] = df["metric"].str.replace("_", " ").str.title().str.replace(" ", "")
+
+    df.to_csv(Path(output_path).joinpath("clustering.tsv"), index=False, sep="\t")
+
+    (
+        df.groupby(["model", "layer", "metric", "split"])["score"]
+        .describe()
+        .drop(["count", "min", "max"], axis=1)
+        .to_latex(
+            Path(output_path).joinpath(f"{fname}_summary.tex"),
+            bold_rows=True,
+            escape=True,
+        )
+    )
+
+    metric_scores_to_plot = df.copy().query("split=='test'")
+    metric_scores_to_plot = metric_scores_to_plot.rename(
+        columns={"score": "Score", "model": "Model Layer", "metric": "Metric"}
+    )
+    metric_scores_to_plot["Model Layer"] = (
+        metric_scores_to_plot["Model Layer"] + " " + metric_scores_to_plot["layer"]
+    )
+    custom_params = {"axes.spines.right": False, "axes.spines.top": False}
+    sns.set_theme(context="paper", font_scale=2, style="ticks", rc=custom_params)
+    fac = 0.7
+
+    g = sns.catplot(
+        data=metric_scores_to_plot,
+        kind="violin",
+        col="Metric",
+        height=9 * fac,
+        aspect=16 / 9 * fac,
+        sharey=True,
+        sharex=False,
+        y="Model Layer",
+        x="Score",
+        split=False,
+        cut=0,
+        fill=False,
+        density_norm="count",
+        inner="quart",
+        linewidth=2,
+        legend_out=False,
+        col_wrap=4,
+    )
+
+    g.savefig(
+        Path(output_path).joinpath(f"{fname}_violin_test.pdf"), bbox_inches="tight"
+    )
+    g.savefig(
+        Path(output_path).joinpath(f"{fname}_violin_test.png"),
+        dpi=300,
+        bbox_inches="tight",
+    )
+
+
+@task(cache_policy=TASK_SOURCE + INPUTS)
+def build_consistedness_df(consistedness_results):
+    """Builds a dataframe with the evaluation metrics."""
+    df = pd.concat(consistedness_results, axis=0, ignore_index=True)
+    df["metric"] = r"$w_{\tau}$"
+
+    return df
+
+
+@task(cache_policy=TASK_SOURCE + INPUTS)
+def save_consistedness(df, output_path):
+    import seaborn as sns
+
+    fname = "consistedness"
+
+    df.to_csv(Path(output_path).joinpath(f"{fname}.tsv"), index=False, sep="\t")
+
+    (
+        df.groupby(["model", "layer", "metric", "split"])["score"]
+        .describe()
+        .drop(["count", "min", "max"], axis=1)
+        .to_latex(
+            Path(output_path).joinpath(f"{fname}_summary.tex"),
+            bold_rows=True,
+            escape=True,
+        )
+    )
+
+    metric_scores_to_plot = df.copy().query("split=='test'")
+    metric_scores_to_plot = metric_scores_to_plot.rename(
+        columns={"score": "Score", "model": "Model Layer", "metric": "Metric"}
+    )
+    metric_scores_to_plot["Model Layer"] = (
+        metric_scores_to_plot["Model Layer"] + " " + metric_scores_to_plot["layer"]
+    )
+    custom_params = {"axes.spines.right": False, "axes.spines.top": False}
+    sns.set_theme(context="paper", font_scale=2, style="ticks", rc=custom_params)
+    fac = 0.7
+
+    g = sns.catplot(
+        data=metric_scores_to_plot,
+        kind="violin",
+        col="Metric",
+        height=9 * fac,
+        aspect=16 / 9 * fac,
+        sharey=True,
+        sharex=False,
+        y="Model Layer",
+        x="Score",
+        split=False,
+        cut=0,
+        fill=False,
+        density_norm="count",
+        inner="quart",
+        linewidth=2,
+        legend_out=False,
+        col_wrap=4,
+    )
+
+    g.savefig(
+        Path(output_path).joinpath(f"{fname}_violin_test.pdf"), bbox_inches="tight"
+    )
+    g.savefig(
+        Path(output_path).joinpath(f"{fname}_violin_test.png"),
+        dpi=300,
+        bbox_inches="tight",
+    )
+
+
 @flow(
-    name="IVAE Training Workflow", task_runner=ThreadPoolTaskRunner(max_workers=N_DEVICES)
+    name="IVAE Training Workflow",
+    task_runner=RayTaskRunner(),
 )
-def main_flow(results_folder: str = RESULTS_FOLDER):
-    print("[main_flow] CUDA disponible:", torch.cuda.is_available())
-    print("[main_flow] GPUs detectadas:", torch.cuda.device_count())
-    time.sleep(5)
-    check_cuda()
-    install_ivae(results_folder=results_folder)
+def main(results_folder: str = RESULTS_FOLDER, models=MODELS, seeds=SEEDS):
+    """Main workflow to install dependencies and run training for different models."""
 
-    models = [f"ivae_random-{frac}" for frac in FRACS] + ["ivae_kegg", "ivae_reactome"]
-    print("[DEBUG] Modelos generados:", models)
+    install_ivae(results_folder=results_folder)
 
     folders = []
     for model in models:
         if "random" in model:
             model_, frac = model.split("-")
         else:
-            model_ = model
             frac = None
-        folders.append(create_folders.submit(model_, frac))
+            model_ = model
+        create_folders.submit(model_, frac)
     wait(folders)
 
-    tasks_to_run = []
+    # Download data
+    data = download_data.submit(data_path=DATA_PATH).result()
+    ivae_config_futures = build_ivae_config.map(models, unmapped(data))
 
-    # ---------- ENTRENAMIENTO ----------
-    for index, (model, seed) in enumerate(itertools.product(models, SEEDS)):
-        if "random" in model:
-            model_, frac = model.split("-")
-        else:
-            model_ = model
-            frac = None
+    all_combinations = list(itertools.product(ivae_config_futures, seeds))
+    all_models = [x[0] for x in all_combinations]
+    all_seeds = [x[1] for x in all_combinations]
 
-        results_folder_model = os.path.join(RESULTS_FOLDER, f"{model_}-{frac}" if frac else model_)
-        output_1 = os.path.join(results_folder_model, f"metrics-seed-{int(seed):02d}.pkl")
-        output_files = [output_1]
+    with remote_options(num_cpus=2, num_gpus=1):
+        result_futures = fit_model.map(all_models, all_seeds, unmapped(data))
 
-        if "random" in model_ or "reactome" in model_:
-            output_files += [
-                os.path.join(results_folder_model, f"encodings_layer-01_seed-{int(seed):02d}.pkl"),
-                os.path.join(results_folder_model, f"encodings_layer-04_seed-{int(seed):02d}.pkl"),
-            ]
-        elif "kegg" in model_:
-            output_files += [
-                os.path.join(results_folder_model, f"encodings_layer-01_seed-{int(seed):02d}.pkl"),
-                os.path.join(results_folder_model, f"encodings_layer-02_seed-{int(seed):02d}.pkl"),
-                os.path.join(results_folder_model, f"encodings_layer-05_seed-{int(seed):02d}.pkl"),
-            ]
+    with remote_options(num_cpus=N_CPUS_CLUSTERING, num_gpus=0):
+        clustering_metrics_futures = evalute_clustering.map(result_futures, all_seeds)
 
-        if should_run_task(task_name = "run_training", output_files = output_files):
-            tasks_to_run.append(
-                run_training.submit(
-                    model_, seed, frac, gpu_ids = list(range(N_GPU))
-                )
-                # model_, seed, frac, gpu_ids = [index%N_GPU]
-            )
+    results = result_futures.result()
+    ivae_config_lst = ivae_config_futures.result()
 
-    # ---------- SCORING ----------
-    for index, model in enumerate(models):
-        if "random" in model:
-            model_, frac = model.split("-")
-        else:
-            model_ = model
-            frac = None
+    with remote_options(num_cpus=1, num_gpus=0):
+        results_by_model_futures = gather_results.map(
+            ivae_config_lst, unmapped(results)
+        )
 
-        base_path = os.path.join(RESULTS_FOLDER, f"{model_}-{frac}" if frac else model_)
-        output_files = [
-            os.path.join(base_path, "scores_informed.pkl"),
-            os.path.join(base_path, "scores_clustering.pkl"),
-            os.path.join(base_path, "scores_metrics.pkl"),
-        ]
+    with remote_options(num_cpus=1, num_gpus=0):
+        consistedness_futures = compute_consistedness.map(results_by_model_futures)
 
-        if should_run_task("score_training", output_files):
-            tasks_to_run.append(score_training.submit(model_, SEED_START, SEED_STEP, SEED_STOP, frac, gpu_id=index % N_GPU))
+    # Wait for all tasks to finish
+    results_by_model = results_by_model_futures.result()
+    clustering_metrics = clustering_metrics_futures.result()
+    consistedness = consistedness_futures.result()
 
-    # ---------- ANALYZE ----------
-    output_files = [
-        os.path.join(RESULTS_FOLDER, "informed.tex"),
-        os.path.join(RESULTS_FOLDER, "clustering.tex"),
-        os.path.join(RESULTS_FOLDER, "model_mse.pdf"),
-        os.path.join(RESULTS_FOLDER, "layer_scores.pdf"),
-        os.path.join(RESULTS_FOLDER, "mse.tex"),
-    ]
+    eval_df = build_eval_df.submit(results_by_model)
+    save_eval.submit(eval_df, results_folder).result()
 
-    if should_run_task("analyze_results", output_files):
-        tasks_to_run.append(analyze_results.submit(FRAC_START, FRAC_STEP, FRAC_STOP, gpu_id=0))
+    clustering_df = build_clustering_df(clustering_metrics)
+    save_clustering.submit(clustering_df, results_folder)
 
-    wait(tasks_to_run)
-    time.sleep(2)  # para cerrar conexiones
+    consistedness_df = build_consistedness_df(consistedness)
+    save_consistedness.submit(consistedness_df, results_folder)
 
+    time.sleep(2)
 
 
 if __name__ == "__main__":
-    main_flow()
+    main()
