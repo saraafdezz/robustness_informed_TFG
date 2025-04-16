@@ -1,5 +1,4 @@
 import itertools
-
 import os
 import time
 from multiprocessing import cpu_count
@@ -31,10 +30,10 @@ from ivae.bio import (
     get_importances,
     train_val_test_split,
 )
+from ivae.datasets import load_kang
 from ivae.models import (
     InformedVAE,
-)  
-from ivae.datasets import load_kang
+)
 
 
 def check_cli_arg_is_bool(arg):
@@ -416,6 +415,8 @@ def compute_consistedness(family_results):
     non_layer_names = ["split", "layer", "seed", "cell_type", "condition", "model"]
     scores = {}
     model_kind = family_results.results[0].config.model_kind
+    model_config = family_results.results[0].config
+    model_kind = model_config.model_kind
 
     n_results = len(family_results)
     n_encoding_layers = len(family_results.results[0].encodings)
@@ -531,7 +532,7 @@ def save_eval(df, output_path):
 def build_clustering_df(clustering_results):
     """Builds a dataframe with the evaluation metrics."""
     df = pd.concat(clustering_results, axis=0, ignore_index=True)
-    df["metric"] = "mutual_info"
+    df["metric"] = "AdjustedMutualInfo"
 
     return df
 
@@ -541,8 +542,6 @@ def save_clustering(df, output_path):
     import seaborn as sns
 
     fname = "clustering"
-
-    df["metric"] = df["metric"].str.replace("_", " ").str.title().str.replace(" ", "")
 
     df.to_csv(Path(output_path).joinpath("clustering.tsv"), index=False, sep="\t")
 
@@ -667,6 +666,64 @@ def save_consistedness(df, output_path):
     )
 
 
+@task(cache_policy=TASK_SOURCE + INPUTS)
+def save_combined(consistedness_df, clustering_df, output_path):
+    import seaborn as sns
+
+    fname = "combined_scores"
+    scores = (
+        pd.concat((consistedness_df, clustering_df), axis=0, ignore_index=True)
+        .query("split=='test'")
+        .query("layer != 'funnel'")
+        .drop(["split"], axis=1)
+        .rename(columns={"kind": "metric"})
+    )
+
+    scores.head()
+
+    scores_to_plot = scores.copy()
+
+    scores_to_plot["Model"] = scores_to_plot["model"] + " - " + scores_to_plot["layer"]
+
+    scores_to_plot = scores_to_plot.rename(
+        columns={"score": "Score", "metric": "Metric"}
+    )
+    scores_to_plot.head()
+
+    custom_params = {"axes.spines.right": False, "axes.spines.top": False}
+    sns.set_theme(context="paper", font_scale=2, style="ticks", rc=custom_params)
+    fac = 0.7
+
+    g = sns.catplot(
+        data=scores_to_plot,
+        kind="violin",
+        col="Metric",
+        height=9 * fac,
+        aspect=16 / 9 * fac,
+        sharey=True,
+        sharex=False,
+        y="Model",
+        x="Score",
+        split=False,
+        cut=0,
+        fill=False,
+        density_norm="count",
+        inner="quart",
+        linewidth=2,
+        legend_out=False,
+        col_wrap=4,
+    )
+
+    g.savefig(
+        Path(output_path).joinpath(f"{fname}_violin_test.pdf"), bbox_inches="tight"
+    )
+    g.savefig(
+        Path(output_path).joinpath(f"{fname}_violin_test.png"),
+        dpi=300,
+        bbox_inches="tight",
+    )
+
+
 @flow(
     name="IVAE Training Workflow",
     task_runner=RayTaskRunner(),
@@ -724,6 +781,8 @@ def main(results_folder: str = RESULTS_FOLDER, models=MODELS, seeds=SEEDS):
 
     consistedness_df = build_consistedness_df(consistedness)
     save_consistedness.submit(consistedness_df, results_folder)
+
+    save_combined.submit(consistedness_df, clustering_df, results_folder)
 
     time.sleep(2)
 
