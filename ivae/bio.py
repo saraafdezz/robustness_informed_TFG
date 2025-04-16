@@ -216,7 +216,7 @@ def build_model_config(data, model_kind, frac=None):
         n_encoding_layers = 3
         x_trans, circuit_adj = sync_gexp_adj(gexp=x_trans, adj=circuit_adj)
         model_layer = [circuit_adj, circuit_to_pathway_adj]
-        adj_name = ["circuit_adj", "circuit_to_pathway_adj"]
+        adj_name = ["circuits", "pathways"]
         layer_entity_names = [kegg_circuit_names, kegg_pathway_names]
         adj_activ = ["tanh", "tanh"]
         input_genes = x_trans.columns.to_list()
@@ -228,7 +228,7 @@ def build_model_config(data, model_kind, frac=None):
         x_trans, reactome = sync_gexp_adj(x_trans, reactome)
         model_layer = [reactome]
         layer_entity_names = [reactome_pathway_names]
-        adj_name = ["reactome"]
+        adj_name = ["pathways"]
         adj_activ = ["tanh"]
         input_genes = x_trans.columns.to_list()
 
@@ -241,7 +241,7 @@ def build_model_config(data, model_kind, frac=None):
         x_trans, random_layer = sync_gexp_adj(x_trans, random_layer)
         model_layer = [random_layer]
         layer_entity_names = [random_layer_names]
-        adj_name = ["random"]
+        adj_name = [f"density-{frac}"]
         adj_activ = ["tanh"]
         input_genes = x_trans.columns.to_list()
 
