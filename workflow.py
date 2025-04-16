@@ -91,7 +91,8 @@ SEEDS = [int(x) for x in seedsAux]
 
 
 MODELS = [f"ivae_random-{frac}" for frac in FRACS] + ["ivae_kegg", "ivae_reactome"]
-MODELS = ["ivae_kegg", "ivae_reactome", "ivae_random-0.1"]
+if DEBUG:
+    MODELS = ["ivae_kegg", "ivae_reactome", "ivae_random-0.1"]
 
 
 @task(cache_policy=TASK_SOURCE + INPUTS)
