@@ -8,7 +8,7 @@ import tensorflow as tf
 import argparse
 
 
-from isrobust_TFG.utils import (set_all_seeds, print_scores)
+from ivae.utils import (set_all_seeds, print_scores)
 
 
 if __name__ == "__main__":

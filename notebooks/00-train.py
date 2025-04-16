@@ -16,7 +16,7 @@ from keras import callbacks
 from keras.models import Model
 from sklearn.preprocessing import minmax_scale
 
-from isrobust_TFG.bio import (
+from ivae.bio import (
     build_hipathia_renamers,
     get_activations,
     get_adj_matrices,
@@ -25,8 +25,8 @@ from isrobust_TFG.bio import (
     sync_gexp_adj,
     train_val_test_split,
 )
-from isrobust_TFG.CI_VAE_CLASS import InformedVAE
-from isrobust_TFG.datasets import load_kang
+from ivae.models import InformedVAE
+from ivae.datasets import load_kang
 
 # args = sys.argv
 

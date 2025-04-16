@@ -1,16 +1,19 @@
-""""
+""" "
 @author: Carlos Loucera
 """
 
+from collections import namedtuple
+from dataclasses import dataclass
 from itertools import chain, repeat
 from pathlib import Path
+from typing import Any, Dict
 
 import numpy as np
 import pandas as pd
-
-from isrobust_TFG.utils import get_resource_path
-
+import scanpy as sc
 from sklearn.model_selection import train_test_split
+
+from ivae.utils import get_resource_path
 
 
 def get_reactome_adj(pth=None):
@@ -82,17 +85,6 @@ def build_pathway_adj_from_circuit_adj(circuit_adj):
     return adj
 
 
-def build_pathway_adj_from_circuit_adj(circuit_adj):
-    tmp_adj = circuit_adj.T
-    tmp_adj.index.name = "circuit"
-    tmp_adj = tmp_adj.reset_index()
-    tmp_adj["pathway"] = tmp_adj.circuit.str.split("-").str[1]
-    tmp_adj = tmp_adj.drop("circuit", axis=1)
-    adj = 1 * tmp_adj.groupby("pathway").any()
-
-    return adj
-
-
 def build_circuit_pathway_adj(circuit_adj, pathway_adj):
     return (1 * (pathway_adj.dot(circuit_adj) > 0)).T
 
@@ -141,37 +133,47 @@ def sync_gexp_adj(gexp, adj):
 
     return gexp, adj
 
+
 ########################################################################################################################
 
+
 # Funciones auxiliares sara
-def get_importances(data, abs=False): # Calcula la importancia de los datos, si no hay abs, lo pone a false
-    if abs:                              # Comprueba si debe tomar valor absoluto o no
-        return np.abs(data).mean(axis=0) 
+def get_importances(
+    data, abs=False
+):  # Calcula la importancia de los datos, si no hay abs, lo pone a false
+    if abs:  # Comprueba si debe tomar valor absoluto o no
+        return np.abs(data).mean(axis=0)
     else:
-        return data.mean(axis=0) # Lo que devuelve es un vector de una fila unica con la media de cada columna
+        return data.mean(
+            axis=0
+        )  # Lo que devuelve es un vector de una fila unica con la media de cada columna
 
 
-def get_activations(act_model, layer_id, data):  # Obtiene las activaciones (?) de una capa específica de los datos
-    data_encoded = act_model.predict(data)[layer_id] # act_model es el modelo de la rn que se esta usando para predecir
-    return data_encoded                              # Pasa los datos de entrada a través del modelo y obtiene lass predicciones de la capa indicada
+def get_activations(
+    act_model, layer_id, data
+):  # Obtiene las activaciones (?) de una capa específica de los datos
+    data_encoded = act_model.predict(data)[
+        layer_id
+    ]  # act_model es el modelo de la rn que se esta usando para predecir
+    return data_encoded  # Pasa los datos de entrada a través del modelo y obtiene lass predicciones de la capa indicada
 
 
 # Divide el conjunto de datos en train, val y test
-def train_val_test_split(features, val_size, test_size, stratify, seed): 
-    train_size = 1 - (val_size + test_size) # Tamaño del train
+def train_val_test_split(features, val_size, test_size, stratify, seed):
+    train_size = 1 - (val_size + test_size)  # Tamaño del train
 
-    x_train, x_test, y_train, y_test = train_test_split( # Divide train y tv est
+    x_train, x_test, y_train, y_test = train_test_split(  # Divide train y tv est
         features,
-        stratify,   
+        stratify,
         train_size=train_size,
         stratify=stratify,  # Mantiene las proporciones (?)
         random_state=seed,
     )
 
-    x_val, x_test = train_test_split( # Extrae del test el val
+    x_val, x_test = train_test_split(  # Extrae del test el val
         x_test,
         test_size=test_size / (test_size + val_size),
-        stratify=y_test, 
+        stratify=y_test,
         random_state=seed,
     )
 
@@ -180,3 +182,104 @@ def train_val_test_split(features, val_size, test_size, stratify, seed):
     x_test = x_test.astype("float32")
 
     return x_train, x_val, x_test
+
+
+@dataclass
+class InformedModelConfig:
+    model_kind: str
+    frac: float
+    n_encoding_layers: int
+    adj_name: list
+    adj_activ: list
+    input_genes: list
+    layer_entity_names: list
+    model_layer: list
+
+
+def build_model_config(data, model_kind, frac=None):
+    if isinstance(data, sc.AnnData):
+        x_trans = data.to_df()
+    else:
+        x_trans = data
+    if model_kind == "ivae_kegg":
+        circuit_adj, circuit_to_pathway_adj = get_adj_matrices(
+            gene_list=x_trans.columns.to_list()
+        )
+        circuit_renamer, pathway_renamer, circuit_to_effector = (
+            build_hipathia_renamers()
+        )
+        kegg_circuit_names = circuit_adj.rename(columns=circuit_renamer).columns
+        kegg_pathway_names = circuit_to_pathway_adj.rename(
+            columns=pathway_renamer
+        ).columns
+        circuit_adj.head()
+        n_encoding_layers = 3
+        x_trans, circuit_adj = sync_gexp_adj(gexp=x_trans, adj=circuit_adj)
+        model_layer = [circuit_adj, circuit_to_pathway_adj]
+        adj_name = ["circuit_adj", "circuit_to_pathway_adj"]
+        layer_entity_names = [kegg_circuit_names, kegg_pathway_names]
+        adj_activ = ["tanh", "tanh"]
+        input_genes = x_trans.columns.to_list()
+
+    elif model_kind == "ivae_reactome":
+        reactome = get_reactome_adj()
+        reactome_pathway_names = reactome.columns
+        n_encoding_layers = 2
+        x_trans, reactome = sync_gexp_adj(x_trans, reactome)
+        model_layer = [reactome]
+        layer_entity_names = [reactome_pathway_names]
+        adj_name = ["reactome"]
+        adj_activ = ["tanh"]
+        input_genes = x_trans.columns.to_list()
+
+    elif "ivae_random" in model_kind:
+        reactome = get_reactome_adj()
+        random_layer, random_layer_names = get_random_adj(
+            frac, shape=reactome.shape, size=reactome.size, index=reactome.index, seed=0
+        )
+        n_encoding_layers = 2
+        x_trans, random_layer = sync_gexp_adj(x_trans, random_layer)
+        model_layer = [random_layer]
+        layer_entity_names = [random_layer_names]
+        adj_name = ["random"]
+        adj_activ = ["tanh"]
+        input_genes = x_trans.columns.to_list()
+
+    else:
+        raise NotImplementedError("Model not yet implemented.")
+
+    model_config = InformedModelConfig(
+        model_kind=model_kind,
+        frac=frac,
+        n_encoding_layers=n_encoding_layers,
+        adj_name=adj_name,
+        adj_activ=adj_activ,
+        input_genes=input_genes,
+        layer_entity_names=layer_entity_names,
+        model_layer=model_layer,
+    )
+
+    return model_config
+
+
+@dataclass
+class IvaeResults:
+    config: InformedModelConfig
+    history: Dict[str, Any]
+    eval: pd.DataFrame
+    encodings: list
+
+
+ModelFamilyResults = namedtuple(
+    "ModelFamilyResults",
+    [
+        "model_kind",
+        "results",
+    ],
+)
+
+
+@dataclass
+class ClusteringResults:
+    config: InformedModelConfig
+    clust_scores: list

@@ -20,7 +20,7 @@ import argparse
 from scipy.stats import weightedtau
 from sklearn.model_selection import train_test_split
 
-from isrobust_TFG.bio import (
+from ivae.bio import (
     build_hipathia_renamers,
     get_adj_matrices,
     get_random_adj,
@@ -31,8 +31,8 @@ from isrobust_TFG.bio import (
     train_val_test_split,
 )
 
-from isrobust_TFG.datasets import load_kang
-from isrobust_TFG.utils import set_all_seeds
+from ivae.datasets import load_kang
+from ivae.utils import set_all_seeds
 
 
 from multiprocessing import cpu_count

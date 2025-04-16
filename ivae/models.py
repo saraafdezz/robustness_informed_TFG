@@ -1,16 +1,14 @@
 import os
 
 os.environ["KERAS_BACKEND"] = "tensorflow"
-import keras
-import time
 import tensorflow as tf
-from keras import ops, regularizers
+from keras import regularizers
 from keras.layers import Dense, Input, Layer
 from keras.models import Model
 from keras.optimizers import Adam
 
-from isrobust_TFG.layers import InformedBiasConstraint, InformedConstraint
-from isrobust_TFG.utils import set_all_seeds
+from ivae.layers import InformedBiasConstraint, InformedConstraint
+from ivae.utils import set_all_seeds
 
 
 class VAELoss(Layer):
@@ -26,7 +24,7 @@ class VAELoss(Layer):
         inputs, outputs, z_mean, z_log_sigma = inputs
         reconstruction_loss = tf.reduce_mean(tf.square(inputs - outputs))
         reconstruction_loss *= self.input_dim
-        #MODIFIED
+        # MODIFIED
         z_log_var = tf.clip_by_value(z_log_sigma, -3, 3)
 
         kl_loss = 1 + z_log_var - tf.square(z_mean) - tf.exp(z_log_var)
