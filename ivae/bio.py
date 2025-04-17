@@ -126,12 +126,11 @@ def build_hipathia_renamers():
     return circuit_renamer, pathway_renamer, circuit_to_effector
 
 
-def sync_gexp_adj(gexp, adj):
-    gene_list = adj.index.intersection(gexp.columns)
-    gexp = gexp.loc[:, gene_list]
+def sync_gexp_adj(genes, adj):
+    gene_list = adj.index.intersection(genes)
     adj = adj.loc[gene_list, :]
 
-    return gexp, adj
+    return gene_list, adj
 
 
 ########################################################################################################################
@@ -196,14 +195,10 @@ class InformedModelConfig:
     model_layer: list
 
 
-def build_model_config(data, model_kind, frac=None):
-    if isinstance(data, sc.AnnData):
-        x_trans = data.to_df()
-    else:
-        x_trans = data
+def build_model_config(genes, model_kind, frac=None):
     if model_kind == "ivae_kegg":
         circuit_adj, circuit_to_pathway_adj = get_adj_matrices(
-            gene_list=x_trans.columns.to_list()
+            gene_list=genes
         )
         circuit_renamer, pathway_renamer, circuit_to_effector = (
             build_hipathia_renamers()
@@ -214,23 +209,23 @@ def build_model_config(data, model_kind, frac=None):
         ).columns
         circuit_adj.head()
         n_encoding_layers = 3
-        x_trans, circuit_adj = sync_gexp_adj(gexp=x_trans, adj=circuit_adj)
+        genes_common, circuit_adj = sync_gexp_adj(genes, adj=circuit_adj)
         model_layer = [circuit_adj, circuit_to_pathway_adj]
         adj_name = ["circuits", "pathways"]
         layer_entity_names = [kegg_circuit_names, kegg_pathway_names]
         adj_activ = ["tanh", "tanh"]
-        input_genes = x_trans.columns.to_list()
+        input_genes = genes_common
 
     elif model_kind == "ivae_reactome":
         reactome = get_reactome_adj()
         reactome_pathway_names = reactome.columns
         n_encoding_layers = 2
-        x_trans, reactome = sync_gexp_adj(x_trans, reactome)
+        genes_common, reactome = sync_gexp_adj(genes, reactome)
         model_layer = [reactome]
         layer_entity_names = [reactome_pathway_names]
         adj_name = ["pathways"]
         adj_activ = ["tanh"]
-        input_genes = x_trans.columns.to_list()
+        input_genes = genes_common
 
     elif "ivae_random" in model_kind:
         reactome = get_reactome_adj()
@@ -238,12 +233,12 @@ def build_model_config(data, model_kind, frac=None):
             frac, shape=reactome.shape, size=reactome.size, index=reactome.index, seed=0
         )
         n_encoding_layers = 2
-        x_trans, random_layer = sync_gexp_adj(x_trans, random_layer)
+        genes_common, random_layer = sync_gexp_adj(genes, random_layer)
         model_layer = [random_layer]
         layer_entity_names = [random_layer_names]
         adj_name = [f"density-{frac}"]
         adj_activ = ["tanh"]
-        input_genes = x_trans.columns.to_list()
+        input_genes = genes_common
 
     else:
         raise NotImplementedError("Model not yet implemented.")
