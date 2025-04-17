@@ -173,3 +173,4 @@ notebooks/debug.ipynb
 # snakemake environments
 
 .snakemake/
+.ruff_cache/
