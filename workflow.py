@@ -37,64 +37,63 @@ from ivae.models import (
 )
 
 
-def check_cli_arg_is_bool(arg):
-    """Check if argument is a boolean.
-
-    Parameters
-    ----------
-    arg : str
-        Argument.
-
-    Returns
-    -------
-    bool
-        Argument.
+def sort_categories_by_pattern(category_list: list[str], pattern: str) -> list[str]:
     """
-    print("*" * 20, arg)
-    if arg in ["true", "True", "TRUE", "1"]:
-        arg = True
-    elif arg in ["false", "False", "FALSE", "0"]:
-        arg = False
-    else:
-        raise ValueError(f"argument {arg} must be a boolean")
+    Sorts a list of category strings, placing items matching the pattern last.
 
-    return arg
+    The function separates the list into two groups: those that contain the
+    pattern (case-insensitive, treated as a whole word) and those that don't.
+    It then sorts each group alphabetically and concatenates them, with the
+    non-matching group coming first.
 
+    Args:
+        category_list: The list of category strings to sort.
+        pattern: The string pattern to search for within category names. Items
+                 containing this pattern (as a whole word, case-insensitive)
+                 will be placed at the end of the sorted list. Handles regex
+                 special characters in the pattern safely.
 
-# --- Load Environment Variables ---
-print("*" * 20, find_dotenv())
-load_dotenv()
+    Returns:
+        A new list with categories sorted according to the rule.
+                 Returns an empty list if the input list is empty.
+    """
+    import re
 
-FRAC_START = os.getenv("FRAC_START", "0.1")
-FRAC_STEP = os.getenv("FRAC_STEP", "0.1")
-FRAC_STOP = os.getenv("FRAC_STOP", "1.0")
-SEED_START = os.getenv("SEED_START", "1")
-SEED_STEP = os.getenv("SEED_STEP", "1")
-SEED_STOP = os.getenv("SEED_STOP", "3")
-RESULTS_FOLDER = os.getenv("RESULTS_FOLDER", "results")
-N_GPU = int(os.getenv("N_GPU", "3"))
-N_CPU = int(os.getenv("N_CPU", "4"))
-DEBUG = check_cli_arg_is_bool(os.getenv("DEBUG", "1"))
-DATA_PATH = os.getenv("DATA_PATH", "data")
-N_CPUS_CLUSTERING = max(1, N_CPU - 2 * N_GPU)
-N_DEVICES = N_GPU if N_GPU > 0 else (N_CPU - 1)
+    if not category_list:
+        return []
 
-print("*" * 20, N_DEVICES, N_CPU, os.getenv("DEBUG"), DEBUG)
-print("*" * 20, os.getenv("PREFECT_RESULTS_PERSIST_BY_DEFAULT"))
-print(DATA_PATH)
-
-# As in the makefile
-fracsAux = np.arange(float(FRAC_START), float(FRAC_STOP), float(FRAC_STEP))
-FRACS = [str(round(x, 10)) for x in fracsAux]
-
-seedsAux = range(int(SEED_START), int(SEED_STOP) + 1, int(SEED_STEP))
-SEEDS = [int(x) for x in seedsAux]
+    # Use re.escape to handle potential special characters in the pattern safely
+    # Use \b for whole word matching (e.g., matches 'random' but not 'randomized')
+    # Use re.IGNORECASE for case-insensitivity
+    try:
+        compiled_pattern = re.compile(pattern, re.IGNORECASE)
+    except re.error as e:
+        print(f"Warning: Invalid pattern provided '{pattern}'. Error: {e}. Pattern matching disabled for this call.")
+         # Fallback: sort alphabetically if pattern is invalid regex
+        sorted_list = sorted(category_list)
+        return sorted_list
 
 
-MODELS = [f"ivae_random-{frac}" for frac in FRACS] + ["ivae_kegg", "ivae_reactome"]
-if DEBUG:
-    print("*"*20, DEBUG)
-    MODELS = ["ivae_kegg", "ivae_reactome", "ivae_random-0.1"]
+    matches = []
+    non_matches = []
+
+    for cat in category_list:
+        # Check if cat is None or not a string, handle gracefully
+        if not isinstance(cat, str):
+             print(f"Warning: Item '{cat}' in category_list is not a string. Skipping.")
+             continue # Skip non-string items
+
+        if compiled_pattern.search(cat):
+            matches.append(cat)
+        else:
+            non_matches.append(cat)
+
+    # Sort each group alphabetically
+    non_matches.sort()
+    matches.sort()
+
+    # Combine the lists: non-matches first, then matches
+    return non_matches + matches
 
 
 @task(cache_policy=TASK_SOURCE + INPUTS)
@@ -513,6 +512,9 @@ def save_eval(df, output_path):
     sns.set_theme(context="paper", font_scale=2, style="ticks", rc=custom_params)
     fac = 0.7
 
+    model_list = metric_scores_to_plot["Model"].to_list()
+    y_order = sort_categories_by_pattern(model_list, "random")
+
     g = sns.catplot(
         data=metric_scores_to_plot,
         kind="violin",
@@ -531,6 +533,7 @@ def save_eval(df, output_path):
         linewidth=2,
         legend_out=False,
         col_wrap=4,
+        order=y_order
     )
 
     g.savefig(
@@ -582,6 +585,9 @@ def save_clustering(df, output_path):
     sns.set_theme(context="paper", font_scale=2, style="ticks", rc=custom_params)
     fac = 0.7
 
+    model_list = metric_scores_to_plot["Model Layer"].to_list()
+    y_order = sort_categories_by_pattern(model_list, "random")
+
     g = sns.catplot(
         data=metric_scores_to_plot,
         kind="violin",
@@ -600,6 +606,7 @@ def save_clustering(df, output_path):
         linewidth=2,
         legend_out=False,
         col_wrap=4,
+        order=y_order
     )
 
     g.savefig(
@@ -651,6 +658,9 @@ def save_consistedness(df, output_path):
     sns.set_theme(context="paper", font_scale=2, style="ticks", rc=custom_params)
     fac = 0.7
 
+    model_list = metric_scores_to_plot["Model Layer"].to_list()
+    y_order = sort_categories_by_pattern(model_list, "random")
+
     g = sns.catplot(
         data=metric_scores_to_plot,
         kind="violin",
@@ -669,6 +679,7 @@ def save_consistedness(df, output_path):
         linewidth=2,
         legend_out=False,
         col_wrap=4,
+        order=y_order
     )
 
     g.savefig(
@@ -703,11 +714,14 @@ def save_combined(consistedness_df, clustering_df, output_path):
     scores_to_plot = scores_to_plot.rename(
         columns={"score": "Score", "metric": "Metric"}
     )
-    scores_to_plot.head()
 
     custom_params = {"axes.spines.right": False, "axes.spines.top": False}
     sns.set_theme(context="paper", font_scale=2, style="ticks", rc=custom_params)
     fac = 0.7
+
+    scores_to_plot["Model Layer"] = scores_to_plot["Model"]
+    model_list = scores_to_plot["Model Layer"].to_list()
+    y_order = sort_categories_by_pattern(model_list, "random")
 
     g = sns.catplot(
         data=scores_to_plot,
@@ -717,7 +731,7 @@ def save_combined(consistedness_df, clustering_df, output_path):
         aspect=16 / 9 * fac,
         sharey=True,
         sharex=False,
-        y="Model",
+        y="Model Layer",
         x="Score",
         split=False,
         cut=0,
@@ -727,6 +741,7 @@ def save_combined(consistedness_df, clustering_df, output_path):
         linewidth=2,
         legend_out=False,
         col_wrap=4,
+        order=y_order
     )
 
     g.savefig(
