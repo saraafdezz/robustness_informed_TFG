@@ -228,6 +228,7 @@ def build_model_config(genes, model_kind, frac=None):
         input_genes = genes_common
 
     elif "ivae_random" in model_kind:
+        model_kind = f"{model_kind}-d{frac}"
         reactome = get_reactome_adj()
         random_layer, random_layer_names = get_random_adj(
             frac, shape=reactome.shape, size=reactome.size, index=reactome.index, seed=0
@@ -236,7 +237,7 @@ def build_model_config(genes, model_kind, frac=None):
         genes_common, random_layer = sync_gexp_adj(genes, random_layer)
         model_layer = [random_layer]
         layer_entity_names = [random_layer_names]
-        adj_name = [f"density-{frac}"]
+        adj_name = ["informed"]
         adj_activ = ["tanh"]
         input_genes = genes_common
 
