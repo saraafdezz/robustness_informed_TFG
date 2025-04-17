@@ -20,7 +20,6 @@ from scipy.stats import weightedtau
 from sklearn.cluster import MiniBatchKMeans
 from sklearn.metrics.cluster import adjusted_mutual_info_score
 from sklearn.preprocessing import minmax_scale
-import ray
 
 from ivae.bio import (
     InformedModelConfig,
@@ -97,28 +96,26 @@ def sort_categories_by_pattern(category_list: list[str], pattern: str) -> list[s
 
 
 @task(cache_policy=TASK_SOURCE + INPUTS)
-def install_ivae(results_folder: str = RESULTS_FOLDER):
+def install_ivae():
     """Installs dependencies using pixi."""
-    os.makedirs(f"{results_folder}/logs", exist_ok=True)
     ShellOperation(commands=["pixi install -a"], working_dir=".").run()
-
     return
 
 
 @task(cache_policy=TASK_SOURCE + INPUTS)
-def create_folders(model_type: str, frac: str = None):
+def create_folders(base_results_folder: str, model_type: str, frac: str = None):
     """Creates folders for a given model type, seed, and optionally fraction."""
-    results_folder = os.path.join(RESULTS_FOLDER, model_type)
+    results_folder = os.path.join(base_results_folder, model_type) # Use passed arg
     if frac:
-        results_folder = os.path.join(RESULTS_FOLDER, f"{model_type}-{frac}")
+        results_folder = os.path.join(base_results_folder, f"{model_type}-{frac}") # Use passed arg
 
-    ShellOperation(commands=[f"mkdir -p {results_folder}/logs"]).run()
-
-    return
+    # Use os.makedirs instead of ShellOperation for simplicity and reliability
+    os.makedirs(os.path.join(results_folder, "logs"), exist_ok=True)
+    # ShellOperation(commands=[f"mkdir -p {results_folder}/logs"]).run()
 
 
 @task(cache_policy=TASK_SOURCE + INPUTS)
-def download_data(data_path: str = DATA_PATH) -> sc.AnnData:
+def download_data(data_path: str) -> str:
     """Downloads data from a given path."""
 
     path = load_kang(data_folder=data_path, normalize=True, n_genes=None, return_path=True)
@@ -127,7 +124,7 @@ def download_data(data_path: str = DATA_PATH) -> sc.AnnData:
 @task(cache_policy=TASK_SOURCE + INPUTS)
 def get_genes(data_path: str) -> list:
     data = sc.read(data_path, cache=True)
-    return data.to_df().columns.to_list()
+    return data.var_names.to_list()
 
 @task(cache_policy=TASK_SOURCE + INPUTS)
 def build_ivae_config(model_kind, genes) -> InformedModelConfig:
@@ -148,14 +145,15 @@ def build_ivae_config(model_kind, genes) -> InformedModelConfig:
 
 def split_data(
     seed: int,
-    path: str
+    path: str,
+    model_config: InformedModelConfig
 ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     """Splits data into train, validation, and test sets."""
 
     data = sc.read(path, cache=True)
 
     obs = data.obs.copy()  # Ignorar
-    x_trans = data.to_df()  # Ignorar
+    x_trans = data.to_df().loc[:, model_config.input_genes]  # Ignorar
 
     # Separa en train, val y test los datos de x_trans
     x_train, x_val, x_test = train_val_test_split(
@@ -190,17 +188,14 @@ def gen_fit_key(context, parameters) -> str:
 
 
 @task(cache_key_fn=gen_fit_key, cache_policy=TASK_SOURCE + INPUTS)
-def fit_model(model_config, seed, path) -> IvaeResults:
+def fit_model(model_config: InformedModelConfig, seed: int, path: str, debug: bool) -> IvaeResults:
     """Fits the model to the data."""
 
-    split = split_data(seed, path)
+    split = split_data(seed, path, model_config)
 
-    N_EPOCHS = 3 if DEBUG else 100
+    N_EPOCHS = 3 if debug else 100
 
     x_train, x_val, x_test, obs_train, obs_val, obs_test = split
-    x_train = x_train.loc[:, model_config.input_genes]
-    x_val = x_val.loc[:, model_config.input_genes]
-    x_test = x_test.loc[:, model_config.input_genes]
 
     # Build and train the VAE
     model = InformedVAE(
@@ -755,13 +750,46 @@ def save_combined(consistedness_df, clustering_df, output_path):
 
 
 @flow(
-    name="IVAE Training Workflow",
-    task_runner=RayTaskRunner(init_kwargs={"log_to_driver":False, "logging_config":ray.LoggingConfig(encoding="JSON", log_level="INFO")}),
+    name="IVAE",
+    task_runner=RayTaskRunner(
+        #init_kwargs={"log_to_driver":False, "logging_config":ray.#LoggingConfig(encoding="JSON", log_level="INFO")}
+        ),
 )
-def main(results_folder: str = RESULTS_FOLDER, models=MODELS, seeds=SEEDS):
+def main(
+    results_folder: str = "results",
+    data_path: str = "data",
+    frac_start: float = 0.1,
+    frac_step: float = 0.1,
+    frac_stop: float = 1.0,
+    n_seeds: int = 3,
+    n_gpu: int = 3,
+    n_cpu: int = 4,
+    debug: bool = True,
+):
     """Main workflow to install dependencies and run training for different models."""
 
-    install_ivae(results_folder=results_folder)
+    print("*"*20, debug)
+
+    if debug:
+        frac_start = 0.1
+        frac_stop = 0.2
+        frac_step = 0.1
+
+    fracsAux = np.arange(frac_start, frac_stop + frac_step/2, frac_step) 
+    fracs = [f"{x:.2f}" for x in fracsAux]
+
+    if debug:
+        n_seeds = 3
+
+    seeds = list(range(n_seeds))
+
+    models = [f"ivae_random-{frac}" for frac in fracs] + ["ivae_kegg", "ivae_reactome"]
+
+    # Use n_cpu and n_gpu arguments
+    # Ensure at least 1 CPU
+    n_cpus_clustering = max(1, n_cpu - 2 * n_gpu if n_gpu > 0 else n_cpu - 1) 
+
+    install_ivae()
 
     folders = []
     for model in models:
@@ -770,12 +798,14 @@ def main(results_folder: str = RESULTS_FOLDER, models=MODELS, seeds=SEEDS):
         else:
             frac = None
             model_ = model
-        create_folders.submit(model_, frac)
+        create_folders.submit(results_folder, model_, frac)
     wait(folders)
 
     # Download data
-    data_path = download_data.submit(data_path=DATA_PATH).result()
-    genes = get_genes.submit(data_path).result()
+    data_path_future = download_data.submit(data_path=data_path)
+    data_path = data_path_future.result()
+    genes_future = get_genes.submit(data_path)
+    genes = genes_future.result()
     ivae_config_futures = build_ivae_config.map(models, unmapped(genes))
 
     all_combinations = list(itertools.product(ivae_config_futures, seeds))
@@ -783,13 +813,13 @@ def main(results_folder: str = RESULTS_FOLDER, models=MODELS, seeds=SEEDS):
     all_seeds = [x[1] for x in all_combinations]
 
     with remote_options(num_cpus=1, num_gpus=1):
-        result_futures = fit_model.map(all_models, all_seeds, unmapped(data_path))
+        result_futures = fit_model.map(all_models, all_seeds, unmapped(data_path), unmapped(debug))
+
+
+    with remote_options(num_cpus=n_cpus_clustering, num_gpus=0):
+        clustering_metrics_futures = evalute_clustering.map(result_futures, all_seeds)
 
     results = result_futures.result()
-
-    with remote_options(num_cpus=N_CPUS_CLUSTERING, num_gpus=0):
-        clustering_metrics_futures = evalute_clustering.map(results, all_seeds)
-
     ivae_config_lst = ivae_config_futures.result()
 
     with remote_options(num_cpus=1, num_gpus=0):
@@ -820,4 +850,67 @@ def main(results_folder: str = RESULTS_FOLDER, models=MODELS, seeds=SEEDS):
 
 
 if __name__ == "__main__":
-    main()
+    import  argparse
+    parser = argparse.ArgumentParser(description="Run the IVAE Benchmark Workflow.")
+
+    parser.add_argument(
+        '--debug',
+        action=argparse.BooleanOptionalAction, 
+        default=False,  
+        help="Run in debug mode (fewer models/epochs). Use --no-debug to disable."
+    )
+
+    parser.add_argument(
+        '--results_folder',
+        type=str,
+        default="results",
+        help="Path to the main folder where results will be saved."
+    )
+
+    parser.add_argument(
+        '--data_path',
+        type=str,
+        default="results/data",
+        help="Path to the folder containing or to download input data."
+    )
+
+    parser.add_argument(
+        '--n_seeds',
+        type=int,
+        default=100,
+        help="Number of repeated holdout procedures."
+    )
+
+    parser.add_argument('--frac_start', type=float, default=0.05, help="Start point for density level used when bulding random layers. Start point.")
+
+    parser.add_argument('--frac_step', type=float, default=0.05, help="Step point for density level used when bulding random layers. Start point.")
+
+    parser.add_argument('--frac_stop', type=float, default=1.0, help="Final point for density level used when bulding random layers. Start point.")
+
+    parser.add_argument(
+        '--n_gpus',
+        type=int,
+        default=3,
+        help="Number of GPUs used for training. Max one model per GPU."
+    )
+
+    parser.add_argument(
+        '--n_cpus',
+        type=int,
+        default=4,
+        help="Max number of CPUs used for no  GPU tasks."
+    )
+
+    args = parser.parse_args()
+
+    main(
+        debug=args.debug,
+        results_folder=args.results_folder,
+        data_path=args.data_path,
+        n_seeds=args.n_seeds,
+        frac_start=args.frac_start,
+        frac_step=args.frac_step,
+        frac_stop=args.frac_stop,
+        n_gpu=args.n_gpus,
+        n_cpu=args.n_cpus,
+    )
