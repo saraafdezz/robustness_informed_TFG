@@ -7,7 +7,6 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 import scanpy as sc
-from dotenv import find_dotenv, load_dotenv
 from keras import callbacks
 from keras.models import Model
 from prefect import flow, get_run_logger, task, unmapped
@@ -67,11 +66,12 @@ def sort_categories_by_pattern(category_list: list[str], pattern: str) -> list[s
     try:
         compiled_pattern = re.compile(pattern, re.IGNORECASE)
     except re.error as e:
-        print(f"Warning: Invalid pattern provided '{pattern}'. Error: {e}. Pattern matching disabled for this call.")
-         # Fallback: sort alphabetically if pattern is invalid regex
+        print(
+            f"Warning: Invalid pattern provided '{pattern}'. Error: {e}. Pattern matching disabled for this call."
+        )
+        # Fallback: sort alphabetically if pattern is invalid regex
         sorted_list = sorted(category_list)
         return sorted_list
-
 
     matches = []
     non_matches = []
@@ -79,8 +79,8 @@ def sort_categories_by_pattern(category_list: list[str], pattern: str) -> list[s
     for cat in category_list:
         # Check if cat is None or not a string, handle gracefully
         if not isinstance(cat, str):
-             print(f"Warning: Item '{cat}' in category_list is not a string. Skipping.")
-             continue # Skip non-string items
+            print(f"Warning: Item '{cat}' in category_list is not a string. Skipping.")
+            continue  # Skip non-string items
 
         if compiled_pattern.search(cat):
             matches.append(cat)
@@ -105,9 +105,11 @@ def install_ivae():
 @task(cache_policy=TASK_SOURCE + INPUTS)
 def create_folders(base_results_folder: str, model_type: str, frac: str = None):
     """Creates folders for a given model type, seed, and optionally fraction."""
-    results_folder = os.path.join(base_results_folder, model_type) # Use passed arg
+    results_folder = os.path.join(base_results_folder, model_type)  # Use passed arg
     if frac:
-        results_folder = os.path.join(base_results_folder, f"{model_type}-{frac}") # Use passed arg
+        results_folder = os.path.join(
+            base_results_folder, f"{model_type}-{frac}"
+        )  # Use passed arg
 
     # Use os.makedirs instead of ShellOperation for simplicity and reliability
     os.makedirs(os.path.join(results_folder, "logs"), exist_ok=True)
@@ -118,13 +120,17 @@ def create_folders(base_results_folder: str, model_type: str, frac: str = None):
 def download_data(data_path: str) -> str:
     """Downloads data from a given path."""
 
-    path = load_kang(data_folder=data_path, normalize=True, n_genes=None, return_path=True)
+    path = load_kang(
+        data_folder=data_path, normalize=True, n_genes=None, return_path=True
+    )
     return path
+
 
 @task(cache_policy=TASK_SOURCE + INPUTS)
 def get_genes(data_path: str) -> list:
     data = sc.read(data_path, cache=True)
     return data.var_names.to_list()
+
 
 @task(cache_policy=TASK_SOURCE + INPUTS)
 def build_ivae_config(model_kind, genes) -> InformedModelConfig:
@@ -144,9 +150,7 @@ def build_ivae_config(model_kind, genes) -> InformedModelConfig:
 
 
 def split_data(
-    seed: int,
-    path: str,
-    model_config: InformedModelConfig
+    seed: int, path: str, model_config: InformedModelConfig
 ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     """Splits data into train, validation, and test sets."""
 
@@ -188,7 +192,9 @@ def gen_fit_key(context, parameters) -> str:
 
 
 @task(cache_key_fn=gen_fit_key, cache_policy=TASK_SOURCE + INPUTS)
-def fit_model(model_config: InformedModelConfig, seed: int, path: str, debug: bool) -> IvaeResults:
+def fit_model(
+    model_config: InformedModelConfig, seed: int, path: str, debug: bool
+) -> IvaeResults:
     """Fits the model to the data."""
 
     split = split_data(seed, path, model_config)
@@ -528,7 +534,7 @@ def save_eval(df, output_path):
         linewidth=2,
         legend_out=False,
         col_wrap=4,
-        order=y_order
+        order=y_order,
     )
 
     g.savefig(
@@ -601,7 +607,7 @@ def save_clustering(df, output_path):
         linewidth=2,
         legend_out=False,
         col_wrap=4,
-        order=y_order
+        order=y_order,
     )
 
     g.savefig(
@@ -674,7 +680,7 @@ def save_consistedness(df, output_path):
         linewidth=2,
         legend_out=False,
         col_wrap=4,
-        order=y_order
+        order=y_order,
     )
 
     g.savefig(
@@ -736,7 +742,7 @@ def save_combined(consistedness_df, clustering_df, output_path):
         linewidth=2,
         legend_out=False,
         col_wrap=4,
-        order=y_order
+        order=y_order,
     )
 
     g.savefig(
@@ -752,8 +758,8 @@ def save_combined(consistedness_df, clustering_df, output_path):
 @flow(
     name="IVAE",
     task_runner=RayTaskRunner(
-        #init_kwargs={"log_to_driver":False, "logging_config":ray.#LoggingConfig(encoding="JSON", log_level="INFO")}
-        ),
+        # init_kwargs={"log_to_driver":False, "logging_config":ray.#LoggingConfig(encoding="JSON", log_level="INFO")}
+    ),
 )
 def main(
     results_folder: str = "results",
@@ -768,14 +774,14 @@ def main(
 ):
     """Main workflow to install dependencies and run training for different models."""
 
-    print("*"*20, debug)
+    print("*" * 20, debug)
 
     if debug:
         frac_start = 0.1
         frac_stop = 0.2
         frac_step = 0.1
 
-    fracsAux = np.arange(frac_start, frac_stop + frac_step/2, frac_step) 
+    fracsAux = np.arange(frac_start, frac_stop + frac_step / 2, frac_step)
     fracs = [f"{x:.2f}" for x in fracsAux]
 
     if debug:
@@ -787,7 +793,7 @@ def main(
 
     # Use n_cpu and n_gpu arguments
     # Ensure at least 1 CPU
-    n_cpus_clustering = max(1, n_cpu - 2 * n_gpu if n_gpu > 0 else n_cpu - 1) 
+    n_cpus_clustering = max(1, n_cpu - 2 * n_gpu if n_gpu > 0 else n_cpu - 1)
 
     install_ivae()
 
@@ -813,8 +819,9 @@ def main(
     all_seeds = [x[1] for x in all_combinations]
 
     with remote_options(num_cpus=1, num_gpus=1):
-        result_futures = fit_model.map(all_models, all_seeds, unmapped(data_path), unmapped(debug))
-
+        result_futures = fit_model.map(
+            all_models, all_seeds, unmapped(data_path), unmapped(debug)
+        )
 
     with remote_options(num_cpus=n_cpus_clustering, num_gpus=0):
         clustering_metrics_futures = evalute_clustering.map(result_futures, all_seeds)
@@ -850,55 +857,71 @@ def main(
 
 
 if __name__ == "__main__":
-    import  argparse
+    import argparse
+
     parser = argparse.ArgumentParser(description="Run the IVAE Benchmark Workflow.")
 
     parser.add_argument(
-        '--debug',
-        action=argparse.BooleanOptionalAction, 
-        default=False,  
-        help="Run in debug mode (fewer models/epochs). Use --no-debug to disable."
+        "--debug",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="Run in debug mode (fewer models/epochs). Use --no-debug to disable.",
     )
 
     parser.add_argument(
-        '--results_folder',
+        "--results_folder",
         type=str,
         default="results",
-        help="Path to the main folder where results will be saved."
+        help="Path to the main folder where results will be saved.",
     )
 
     parser.add_argument(
-        '--data_path',
+        "--data_path",
         type=str,
         default="results/data",
-        help="Path to the folder containing or to download input data."
+        help="Path to the folder containing or to download input data.",
     )
 
     parser.add_argument(
-        '--n_seeds',
+        "--n_seeds",
         type=int,
         default=100,
-        help="Number of repeated holdout procedures."
+        help="Number of repeated holdout procedures.",
     )
 
-    parser.add_argument('--frac_start', type=float, default=0.05, help="Start point for density level used when bulding random layers. Start point.")
-
-    parser.add_argument('--frac_step', type=float, default=0.05, help="Step point for density level used when bulding random layers. Start point.")
-
-    parser.add_argument('--frac_stop', type=float, default=1.0, help="Final point for density level used when bulding random layers. Start point.")
+    parser.add_argument(
+        "--frac_start",
+        type=float,
+        default=0.05,
+        help="Start point for density level used when bulding random layers. Start point.",
+    )
 
     parser.add_argument(
-        '--n_gpus',
+        "--frac_step",
+        type=float,
+        default=0.05,
+        help="Step point for density level used when bulding random layers. Start point.",
+    )
+
+    parser.add_argument(
+        "--frac_stop",
+        type=float,
+        default=1.0,
+        help="Final point for density level used when bulding random layers. Start point.",
+    )
+
+    parser.add_argument(
+        "--n_gpus",
         type=int,
         default=3,
-        help="Number of GPUs used for training. Max one model per GPU."
+        help="Number of GPUs used for training. Max one model per GPU.",
     )
 
     parser.add_argument(
-        '--n_cpus',
+        "--n_cpus",
         type=int,
         default=4,
-        help="Max number of CPUs used for no  GPU tasks."
+        help="Max number of CPUs used for no  GPU tasks.",
     )
 
     args = parser.parse_args()
