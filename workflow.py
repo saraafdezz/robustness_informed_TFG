@@ -20,6 +20,7 @@ from scipy.stats import weightedtau
 from sklearn.cluster import MiniBatchKMeans
 from sklearn.metrics.cluster import adjusted_mutual_info_score
 from sklearn.preprocessing import minmax_scale
+import ray
 
 from ivae.bio import (
     InformedModelConfig,
@@ -92,6 +93,7 @@ SEEDS = [int(x) for x in seedsAux]
 
 MODELS = [f"ivae_random-{frac}" for frac in FRACS] + ["ivae_kegg", "ivae_reactome"]
 if DEBUG:
+    print("*"*20, DEBUG)
     MODELS = ["ivae_kegg", "ivae_reactome", "ivae_random-0.1"]
 
 
@@ -120,12 +122,16 @@ def create_folders(model_type: str, frac: str = None):
 def download_data(data_path: str = DATA_PATH) -> sc.AnnData:
     """Downloads data from a given path."""
 
-    data = load_kang(data_folder=data_path, normalize=True, n_genes=None)
-    return data
-
+    path = load_kang(data_folder=data_path, normalize=True, n_genes=None, return_path=True)
+    return path
 
 @task(cache_policy=TASK_SOURCE + INPUTS)
-def build_ivae_config(model_kind, data) -> InformedModelConfig:
+def get_genes(data_path: str) -> list:
+    data = sc.read(data_path, cache=True)
+    return data.to_df().columns.to_list()
+
+@task(cache_policy=TASK_SOURCE + INPUTS)
+def build_ivae_config(model_kind, genes) -> InformedModelConfig:
     if "random" in model_kind:
         model, frac = model_kind.split("-")
         frac = float(frac)
@@ -134,7 +140,7 @@ def build_ivae_config(model_kind, data) -> InformedModelConfig:
         model = model_kind
 
     model_config = build_model_config(
-        data,
+        genes,
         model_kind=model,
         frac=frac,
     )
@@ -143,9 +149,11 @@ def build_ivae_config(model_kind, data) -> InformedModelConfig:
 
 def split_data(
     seed: int,
-    data: sc.AnnData,
+    path: str
 ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     """Splits data into train, validation, and test sets."""
+
+    data = sc.read(path, cache=True)
 
     obs = data.obs.copy()  # Ignorar
     x_trans = data.to_df()  # Ignorar
@@ -159,7 +167,11 @@ def split_data(
         seed=seed,
     )
 
-    return x_train, x_val, x_test
+    obs_train = obs.loc[x_train.index, :]
+    obs_test = obs.loc[x_test.index, :]
+    obs_val = obs.loc[x_val.index, :]
+
+    return x_train, x_val, x_test, obs_train, obs_val, obs_test
 
 
 def gen_fit_key(context, parameters) -> str:
@@ -179,14 +191,14 @@ def gen_fit_key(context, parameters) -> str:
 
 
 @task(cache_key_fn=gen_fit_key, cache_policy=TASK_SOURCE + INPUTS)
-def fit_model(model_config, seed, data) -> IvaeResults:
+def fit_model(model_config, seed, path) -> IvaeResults:
     """Fits the model to the data."""
 
-    split = split_data(seed, data)
+    split = split_data(seed, path)
 
     N_EPOCHS = 3 if DEBUG else 100
 
-    x_train, x_val, x_test = split
+    x_train, x_val, x_test, obs_train, obs_val, obs_test = split
     x_train = x_train.loc[:, model_config.input_genes]
     x_val = x_val.loc[:, model_config.input_genes]
     x_test = x_test.loc[:, model_config.input_genes]
@@ -221,7 +233,7 @@ def fit_model(model_config, seed, data) -> IvaeResults:
     )
 
     evals = evaluate_model(model, model_config, split, seed)
-    encodings = predict_encodings(model, model_config, split, seed, data)
+    encodings = predict_encodings(model, model_config, split, seed)
 
     results = IvaeResults(
         config=model_config,
@@ -235,7 +247,7 @@ def fit_model(model_config, seed, data) -> IvaeResults:
 
 def evaluate_model(model, model_config, split, seed):
     """Evaluates the model."""
-    x_train, x_val, x_test = split
+    x_train, x_val, x_test, obs_train, obs_val, obs_test = split
     x_train = x_train.loc[:, model_config.input_genes]
     x_val = x_val.loc[:, model_config.input_genes]
     x_test = x_test.loc[:, model_config.input_genes]
@@ -267,9 +279,11 @@ def evaluate_model(model, model_config, split, seed):
     return eval_results
 
 
-def predict_encodings(model, model_config, split, seed, data):
+def predict_encodings(model, model_config, split, seed):
     """Gets the activations of the model."""
-    x_train, x_val, x_test = split
+
+    x_train, x_val, x_test, obs_train, obs_val, obs_test = split
+    obs = pd.concat((obs_train, obs_val, obs_test), axis=0, ignore_index=False)
     x_train = x_train.loc[:, model_config.input_genes]
     x_val = x_val.loc[:, model_config.input_genes]
     x_test = x_test.loc[:, model_config.input_genes]
@@ -319,7 +333,7 @@ def predict_encodings(model, model_config, split, seed, data):
         encodings_i["model"] = model_config.model_kind
 
         encodings_i = encodings_i.merge(
-            data.obs[["cell_type", "condition"]],
+            obs[["cell_type", "condition"]],
             how="left",
             left_index=True,
             right_index=True,
@@ -727,7 +741,7 @@ def save_combined(consistedness_df, clustering_df, output_path):
 
 @flow(
     name="IVAE Training Workflow",
-    task_runner=RayTaskRunner(),
+    task_runner=RayTaskRunner(init_kwargs={"log_to_driver":False, "logging_config":ray.LoggingConfig(encoding="JSON", log_level="INFO")}),
 )
 def main(results_folder: str = RESULTS_FOLDER, models=MODELS, seeds=SEEDS):
     """Main workflow to install dependencies and run training for different models."""
@@ -745,20 +759,22 @@ def main(results_folder: str = RESULTS_FOLDER, models=MODELS, seeds=SEEDS):
     wait(folders)
 
     # Download data
-    data = download_data.submit(data_path=DATA_PATH).result()
-    ivae_config_futures = build_ivae_config.map(models, unmapped(data))
+    data_path = download_data.submit(data_path=DATA_PATH).result()
+    genes = get_genes.submit(data_path).result()
+    ivae_config_futures = build_ivae_config.map(models, unmapped(genes))
 
     all_combinations = list(itertools.product(ivae_config_futures, seeds))
     all_models = [x[0] for x in all_combinations]
     all_seeds = [x[1] for x in all_combinations]
 
-    with remote_options(num_cpus=2, num_gpus=1):
-        result_futures = fit_model.map(all_models, all_seeds, unmapped(data))
-
-    with remote_options(num_cpus=N_CPUS_CLUSTERING, num_gpus=0):
-        clustering_metrics_futures = evalute_clustering.map(result_futures, all_seeds)
+    with remote_options(num_cpus=1, num_gpus=1):
+        result_futures = fit_model.map(all_models, all_seeds, unmapped(data_path))
 
     results = result_futures.result()
+
+    with remote_options(num_cpus=N_CPUS_CLUSTERING, num_gpus=0):
+        clustering_metrics_futures = evalute_clustering.map(results, all_seeds)
+
     ivae_config_lst = ivae_config_futures.result()
 
     with remote_options(num_cpus=1, num_gpus=0):
