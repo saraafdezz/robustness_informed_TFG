@@ -19,6 +19,7 @@ from scipy.stats import weightedtau
 from sklearn.cluster import MiniBatchKMeans
 from sklearn.metrics.cluster import adjusted_mutual_info_score
 from sklearn.preprocessing import minmax_scale
+import ray
 
 from ivae.bio import (
     InformedModelConfig,
@@ -208,7 +209,7 @@ def fit_model(
         adjacency_matrices=model_config.model_layer,
         adjacency_names=model_config.adj_name,
         adjacency_activation=model_config.adj_activ,
-        seed=0,
+        seed=seed,
     )
 
     model._build_vae()
@@ -758,7 +759,7 @@ def save_combined(consistedness_df, clustering_df, output_path):
 @flow(
     name="IVAE",
     task_runner=RayTaskRunner(
-        # init_kwargs={"log_to_driver":False, "logging_config":ray.#LoggingConfig(encoding="JSON", log_level="INFO")}
+        init_kwargs={"log_to_driver":False, "logging_config":ray.LoggingConfig(encoding="JSON", log_level="INFO")}
     ),
 )
 def main(
