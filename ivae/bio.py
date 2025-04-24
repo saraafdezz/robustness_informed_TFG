@@ -98,7 +98,7 @@ def get_adj_matrices(gene_list=None):
 
 
 def get_random_adj(frac, shape, size, seed, index):
-    np.random.RandomState(seed)
+    np.random.seed(seed)
     random_layer = np.random.binomial(1, frac, size=size)
     random_layer = random_layer.reshape(shape)
     random_layer_names = [f"rand-{icol:02d}" for icol in range(random_layer.shape[1])]
