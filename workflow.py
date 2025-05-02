@@ -1,4 +1,4 @@
-import itertools
+import gc
 import os
 import time
 from multiprocessing import cpu_count
@@ -6,10 +6,11 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+import ray
 import scanpy as sc
 from keras import callbacks
 from keras.models import Model
-from prefect import flow, get_run_logger, task, unmapped
+from prefect import flow, get_run_logger, task
 from prefect.cache_policies import INPUTS, TASK_SOURCE
 from prefect.futures import wait
 from prefect_ray import RayTaskRunner
@@ -19,7 +20,6 @@ from scipy.stats import weightedtau
 from sklearn.cluster import MiniBatchKMeans
 from sklearn.metrics.cluster import adjusted_mutual_info_score
 from sklearn.preprocessing import minmax_scale
-import ray
 
 from ivae.bio import (
     InformedModelConfig,
@@ -200,7 +200,7 @@ def fit_model(
 
     split = split_data(seed, path, model_config)
 
-    N_EPOCHS = 3 if debug else 100
+    N_EPOCHS = 10 if debug else 1000
 
     x_train, x_val, x_test, obs_train, obs_val, obs_test = split
 
@@ -238,7 +238,7 @@ def fit_model(
 
     results = IvaeResults(
         config=model_config,
-        history=history.history,
+        history={},
         eval=evals,
         encodings=encodings,
     )
@@ -410,7 +410,7 @@ def evalute_clustering(results, seed) -> pd.DataFrame:
     return clust_scores
 
 
-@task(cache_policy=TASK_SOURCE + INPUTS)
+@task(cache_policy=TASK_SOURCE + INPUTS, cache_result_in_memory=False)
 def gather_results(model_config, results_lst):
     """Gathers all result futures for each model_config."""
 
@@ -425,57 +425,184 @@ def gather_results(model_config, results_lst):
 
 
 @task(cache_policy=TASK_SOURCE + INPUTS)
-def compute_consistedness(family_results):
-    """Compute consistency of the results."""
-    # Implement the logic to compute consistency
+def gather_evals(results_lst):
+    """Gathers all result futures for each model_config."""
+
+    df = pd.concat([result.eval for result in results_lst], axis=0, ignore_index=True)
+
+    return df
+
+
+@task(cache_policy=TASK_SOURCE + INPUTS)
+def compute_consistedness(results_list: list[IvaeResults]) -> pd.DataFrame:
+    """
+    Compute consistency (pairwise weighted tau of importances) across multiple runs (seeds)
+    for a single model configuration.
+
+    Args:
+        results_list: A list of IvaeResults objects, typically one per seed for the same model.
+                      Prefect resolves the futures passed via .submit() to provide this list.
+
+    Returns:
+        A pandas DataFrame with consistency scores per layer and data split.
+    """
+    logger = get_run_logger()
+    logger.info(f"Computing consistency for {len(results_list)} results.")
+
+    if not results_list:
+        logger.warning(
+            "Received empty list for consistency computation. Returning empty DataFrame."
+        )
+        return pd.DataFrame(columns=["layer", "split", "score", "model"])
+
+    # --- Configuration and Setup ---
+    try:
+        # Assume all results in the list share the same config
+        model_config = results_list[0].config
+        model_kind = model_config.model_kind
+        # Check if the first result actually has encodings
+        if not results_list[0].encodings:
+            logger.warning(
+                f"First result for model '{model_kind}' has no encodings. Cannot compute consistency."
+            )
+            return pd.DataFrame(columns=["layer", "split", "score", "model"])
+        n_encoding_layers = len(results_list[0].encodings)
+    except (AttributeError, IndexError) as e:
+        logger.error(
+            f"Could not extract config or encodings from first result: {e}. Returning empty DataFrame."
+        )
+        return pd.DataFrame(columns=["layer", "split", "score", "model"])
+
     non_layer_names = ["split", "layer", "seed", "cell_type", "condition", "model"]
     scores = {}
-    model_kind = family_results.results[0].config.model_kind
-    model_config = family_results.results[0].config
-    model_kind = model_config.model_kind
+    n_results = len(results_list)
+    logger.info(
+        f"Model: {model_kind}, Seeds: {n_results}, Encoding Layers: {n_encoding_layers}"
+    )
 
-    n_results = len(family_results)
-    n_encoding_layers = len(family_results.results[0].encodings)
+    # --- Calculate Pairwise Consistency ---
     for i in range(n_encoding_layers):
-        layer_id = family_results.results[0].encodings[i]["layer"].iloc[0]
-        scores[layer_id] = {}
+        # Get layer ID from the first result, assuming structure is consistent
+        try:
+            # Check if encodings[i] exists and is not empty before accessing iloc[0]
+            if (
+                i >= len(results_list[0].encodings)
+                or results_list[0].encodings[i].empty
+            ):
+                logger.warning(
+                    f"Skipping layer index {i} for model '{model_kind}' as it's missing or empty in the first result."
+                )
+                continue
+            layer_id = results_list[0].encodings[i]["layer"].iloc[0]
+            scores[layer_id] = {"train": [], "test": [], "val": []}
+            logger.debug(f"Processing layer: {layer_id}")
+        except (IndexError, KeyError, AttributeError) as e:
+            logger.warning(
+                f"Could not get layer_id for layer index {i} from first result: {e}. Skipping layer."
+            )
+            continue
 
         for split in ["train", "test", "val"]:
-            # encodings_i = [x.loc[x["split"] == split].drop(non_layer_names, axis=1) for r in results for x in r.encodings[i]]
-            scores[layer_id][split] = []
-            for j in range(n_results):
-                r_j = family_results.results[j].encodings[i]
-                encodings_j = r_j.loc[r_j["split"] == split].drop(
-                    non_layer_names, axis=1
-                )
-                importances_j = get_importances(data=encodings_j, abs=True)
-                for k in range(j + 1, n_results):
-                    r_k = family_results.results[k].encodings[i]
-                    encodings_k = r_k.loc[r_k["split"] == split].drop(
-                        non_layer_names, axis=1
-                    )
-                    importances_k = get_importances(data=encodings_k, abs=True)
-                    scores[layer_id][split].append(
-                        weightedtau(importances_j, importances_k)[0]
+            # Pre-calculate importances for all valid results for this layer/split
+            all_importances = {}  # Dictionary {result_index: importances}
+            for res_idx in range(n_results):
+                try:
+                    # Check if encodings exist for this result and layer index i
+                    if (
+                        i < len(results_list[res_idx].encodings)
+                        and not results_list[res_idx].encodings[i].empty
+                    ):
+                        r_res = results_list[res_idx].encodings[i]
+                        encodings_split = r_res.loc[r_res["split"] == split].drop(
+                            non_layer_names, axis=1, errors="ignore"
+                        )
+
+                        if not encodings_split.empty:
+                            # Calculate importances (ensure get_importances is robust)
+                            imp = get_importances(data=encodings_split, abs=True)
+                            if (
+                                imp is not None
+                            ):  # Check if get_importances returned valid data
+                                all_importances[res_idx] = imp
+                            else:
+                                logger.warning(
+                                    f"get_importances returned None for result {res_idx}, layer '{layer_id}', split '{split}'."
+                                )
+                        # else: logger.debug(f"No data for result {res_idx}, layer '{layer_id}', split '{split}' after filtering.")
+                    # else: logger.debug(f"Encodings missing/empty at index {i} for result {res_idx}.")
+                except Exception as e:
+                    logger.warning(
+                        f"Error processing importances for result {res_idx}, layer '{layer_id}', split '{split}': {e}"
                     )
 
-    scores_df = (
-        pd.DataFrame.from_dict(scores)
-        .melt(var_name="layer", value_name="score", ignore_index=False)
-        .reset_index(names=["split"])
-        .explode("score")
+            # Compute pairwise weighted tau using pre-calculated importances
+            valid_indices = sorted(all_importances.keys())
+            num_valid = len(valid_indices)
+            logger.debug(
+                f"  Split '{split}': Found valid importances for {num_valid}/{n_results} results."
+            )
+
+            for j_outer_idx in range(num_valid):
+                idx_j = valid_indices[j_outer_idx]
+                importances_j = all_importances[idx_j]
+
+                for k_outer_idx in range(j_outer_idx + 1, num_valid):
+                    idx_k = valid_indices[k_outer_idx]
+                    importances_k = all_importances[idx_k]
+
+                    try:
+                        # Ensure vectors are not identical or problematic for weightedtau
+                        if (
+                            len(importances_j) == len(importances_k)
+                            and len(importances_j) > 0
+                        ):
+                            tau_score, _ = weightedtau(importances_j, importances_k)
+                            scores[layer_id][split].append(tau_score)
+                        # else: logger.debug(f"Skipping tau calc due to length mismatch or zero length between {idx_j} and {idx_k}")
+                    except Exception as e:
+                        logger.warning(
+                            f"Could not compute weightedtau between results {idx_j} and {idx_k} for layer '{layer_id}', split '{split}': {e}"
+                        )
+
+    # --- Format Results ---
+    if not scores:
+        logger.warning(
+            f"No consistency scores calculated for model '{model_kind}'. Returning empty DataFrame."
+        )
+        return pd.DataFrame(columns=["layer", "split", "score", "model"])
+
+    try:
+        scores_df = (
+            pd.DataFrame.from_dict(scores)
+            .melt(var_name="layer", value_name="score", ignore_index=False)
+            .reset_index(names=["split"])
+            .explode("score")  # Handle potential empty lists gracefully
+        )
+        scores_df = scores_df.dropna(
+            subset=["score"]
+        )  # Remove rows where score is NaN/None
+        if not scores_df.empty:
+            scores_df["score"] = scores_df["score"].astype("float")
+        scores_df["model"] = model_kind
+    except Exception as e:
+        logger.error(
+            f"Failed to create DataFrame from scores dict for model '{model_kind}': {e}"
+        )
+        return pd.DataFrame(
+            columns=["layer", "split", "score", "model"]
+        )  # Return empty on formatting error
+
+    logger.info(
+        f"Finished consistency computation for model '{model_kind}'. Result shape: {scores_df.shape}"
     )
-    scores_df["score"] = scores_df["score"].astype("float")
-    scores_df["model"] = model_kind
-
     return scores_df
 
 
 @task(cache_policy=TASK_SOURCE + INPUTS)
-def build_eval_df(results_by_model):
+def build_eval_df(eval_lst):
     """Builds a dataframe with the evaluation metrics."""
     df = pd.concat(
-        [i.eval.drop(columns=["seed"]) for r in results_by_model for i in r.results],
+        [df.drop(columns=["seed"]) for df in eval_lst],
         axis=0,
         ignore_index=True,
     )
@@ -757,9 +884,12 @@ def save_combined(consistedness_df, clustering_df, output_path):
 
 
 @flow(
-    name="IVAE",
+    name="m-IVAE",
     task_runner=RayTaskRunner(
-        init_kwargs={"log_to_driver":False, "logging_config":ray.LoggingConfig(encoding="JSON", log_level="INFO")}
+        init_kwargs={
+            "log_to_driver": False,
+            "logging_config": ray.LoggingConfig(encoding="JSON", log_level="ERROR"),
+        }
     ),
 )
 def main(
@@ -796,7 +926,7 @@ def main(
     # Ensure at least 1 CPU
     n_cpus_clustering = max(1, n_cpu - 2 * n_gpu if n_gpu > 0 else n_cpu - 1)
 
-    install_ivae()
+    install_ivae.submit().result()
 
     folders = []
     for model in models:
@@ -813,46 +943,65 @@ def main(
     data_path = data_path_future.result()
     genes_future = get_genes.submit(data_path)
     genes = genes_future.result()
-    ivae_config_futures = build_ivae_config.map(models, unmapped(genes))
+    # ivae_config_futures = build_ivae_config.map(models, unmapped(genes))
 
-    all_combinations = list(itertools.product(ivae_config_futures, seeds))
-    all_models = [x[0] for x in all_combinations]
-    all_seeds = [x[1] for x in all_combinations]
+    # all_combinations = list(itertools.product(ivae_config_futures, seeds))
+    # all_models = [x[0] for x in all_combinations]
+    # all_seeds = [x[1] for x in all_combinations]
 
-    with remote_options(num_cpus=1, num_gpus=1):
-        result_futures = fit_model.map(
-            all_models, all_seeds, unmapped(data_path), unmapped(debug)
-        )
+    evals = []
+    consistedness = []
+    clustering_metrics = []
 
-    with remote_options(num_cpus=n_cpus_clustering, num_gpus=0):
-        clustering_metrics_futures = evalute_clustering.map(result_futures, all_seeds)
+    for model in models:
+        if "random" in model:
+            model_, frac = model.split("-")
+        else:
+            frac = None
+            model_ = model
+        create_folders.submit(results_folder, model_, frac).result()
+        ivae_config = build_ivae_config.submit(model, genes).result()
 
-    results = result_futures.result()
-    ivae_config_lst = ivae_config_futures.result()
+        results = []
 
-    with remote_options(num_cpus=1, num_gpus=0):
-        results_by_model_futures = gather_results.map(
-            ivae_config_lst, unmapped(results)
-        )
+        for seed in seeds:
+            with remote_options(num_cpus=1, num_gpus=1):
+                result_future = fit_model.submit(ivae_config, seed, data_path, debug)
 
-    with remote_options(num_cpus=1, num_gpus=0):
-        consistedness_futures = compute_consistedness.map(results_by_model_futures)
+            with remote_options(num_cpus=n_cpus_clustering, num_gpus=0):
+                clustering_metrics_futures = evalute_clustering.submit(
+                    result_future, seed
+                )
+
+            results.append(result_future)
+            clustering_metrics.append(clustering_metrics_futures)
+
+        wait(results)
+
+        with remote_options(num_cpus=1, num_gpus=0):
+            eval_futures = gather_evals.submit(results)
+            evals.append(eval_futures)
+            consistedness_futures = compute_consistedness.submit(results)
+            consistedness.append(consistedness_futures)
+
+        del results
+        gc.collect()
 
     # Wait for all tasks to finish
-    results_by_model = results_by_model_futures.result()
-    clustering_metrics = clustering_metrics_futures.result()
-    consistedness = consistedness_futures.result()
+    wait(clustering_metrics)
+    wait(evals)
+    wait(consistedness)
 
-    eval_df = build_eval_df.submit(results_by_model)
+    eval_df = build_eval_df.submit(evals)
     save_eval.submit(eval_df, results_folder).result()
 
     clustering_df = build_clustering_df(clustering_metrics)
-    save_clustering.submit(clustering_df, results_folder)
+    save_clustering.submit(clustering_df, results_folder).result()
 
     consistedness_df = build_consistedness_df(consistedness)
-    save_consistedness.submit(consistedness_df, results_folder)
+    save_consistedness.submit(consistedness_df, results_folder).result()
 
-    save_combined.submit(consistedness_df, clustering_df, results_folder)
+    save_combined.submit(consistedness_df, clustering_df, results_folder).result()
 
     time.sleep(2)
 
