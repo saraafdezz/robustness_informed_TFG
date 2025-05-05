@@ -1,0 +1,7 @@
+Homo_sapiens.sif.zip
+PathwayCommons12.humancyc.BIOPAX.sif.zip
+Homo_sapiens.owl.zip
+PathwayCommons12.kegg.BIOPAX.zip
+PathwayCommons12.humancyc.BIOPAX.owl.zip
+PathwayCommons12.kegg.BIOPAX.owl.zip
+PathwayCommons12.humancyc.BIOPAX.pathways.txt.zip
