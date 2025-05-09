@@ -19,7 +19,9 @@ from prefect_shell import ShellOperation
 from scipy.stats import weightedtau
 from sklearn.cluster import MiniBatchKMeans
 from sklearn.metrics.cluster import adjusted_mutual_info_score
-from sklearn.preprocessing import minmax_scale
+from sklearn.preprocessing import (minmax_scale, Normalizer)
+from sklearn.decomposition import PCA
+import scanpy.external as sce
 
 from ivae.bio import (
     InformedModelConfig,
@@ -35,7 +37,11 @@ from ivae.models import (
     InformedVAE,
 )
 
+from pathsingle.metrics import calculate_sparsity
+from pathsingle.activity import calc_activity
 
+
+# IVAE
 def sort_categories_by_pattern(category_list: list[str], pattern: str) -> list[str]:
     """
     Sorts a list of category strings, placing items matching the pattern last.
@@ -193,7 +199,7 @@ def gen_fit_key(context, parameters) -> str:
 
 
 @task(cache_key_fn=gen_fit_key, cache_policy=TASK_SOURCE + INPUTS)
-def fit_model(
+def fit_model_ivae(
     model_config: InformedModelConfig, seed: int, path: str, debug: bool
 ) -> IvaeResults:
     """Fits the model to the data."""
@@ -883,6 +889,54 @@ def save_combined(consistedness_df, clustering_df, output_path):
     )
 
 
+# Tasks for PathSingle
+@task(cache_policy=TASK_SOURCE + INPUTS)
+def load_kang_data_ps(data_path: str, debug: bool) -> sc.AnnData:
+    """Loads Kang dataset and prepares it for PathSingle by subsampling (if debug) and adding cell labels"""
+    adata = sc.read_h5ad(data_path)
+    if debug:
+        adata = sc.pp.subsample(adata, fraction=0.05, copy=True)
+    adata.obs['labels'] = adata.obs['cell_type']
+    return adata
+
+@task(cache_policy=TASK_SOURCE + INPUTS)
+def preprocess_data_ps(adata: sc.AnnData) -> tuple[sc.AnnData, int, pd.Series]:
+    """Normalizes, transforms and prepares raw Kang data for downstream PathSingle analysis"""
+    sc.pp.normalize_total(adata)
+    sc.pp.sqrt(adata)
+    adata.raw = adata.copy()
+    true_labels = adata.obs['labels']
+    n_clusters = adata.obs['labels'].nunique()
+    return adata, n_clusters, true_labels
+
+@task
+def apply_magic_and_calc_activity(adata: sc.AnnData) -> Path:
+    """Applies MAGIC imputation and computes activity scores using PathSingle's custom graph-based method"""
+    sparsity = calculate_sparsity(adata)
+    sce.pp.magic(adata, name_list='all_genes')
+    calc_activity(adata, sparsity)
+
+    output_path = Path("./data/output_activity.csv")
+    return output_path
+
+@task(cache_policy=TASK_SOURCE + INPUTS)
+def postprocess_activity_matrix(output_path: Path) -> pd.DataFrame:
+    """Normalizes and reduces dimensionality of the PathSingle activity matrix using PCA"""
+    activity_df = pd.read_csv(output_path, index_col=0)
+    activity_scaled = Normalizer().fit_transform(activity_df)
+    activity_pca = PCA(n_components=30, svd_solver='arpack').fit_transform(activity_scaled)
+    return pd.DataFrame(activity_pca, index=activity_df.index)
+
+@task
+def save_results_ps(results: dict, output_path: str):
+    """Saves the metrics from PathSingle in a .tsv file"""
+    df = pd.DataFrame([results])
+    Path(output_path).mkdir(parents=True, exist_ok=True)
+    df.to_csv(Path(output_path) / "pathsingle_metrics.tsv", sep="\t", index=False)
+
+
+
+# Flow
 @flow(
     name="m-IVAE",
     task_runner=RayTaskRunner(
@@ -903,10 +957,11 @@ def main(
     n_cpu: int = 4,
     debug: bool = True,
 ):
-    """Main workflow to install dependencies and run training for different models."""
+    """Main workflow to run IVAE experiments and PathSingle benchmark on Kang dataset"""
 
     print("*" * 20, debug)
 
+    # --- IVAE SETUP ---
     if debug:
         frac_start = 0.1
         frac_stop = 0.2
@@ -966,7 +1021,7 @@ def main(
 
         for seed in seeds:
             with remote_options(num_cpus=1, num_gpus=1):
-                result_future = fit_model.submit(ivae_config, seed, data_path, debug)
+                result_future = fit_model_ivae.submit(ivae_config, seed, data_path, debug)
 
             with remote_options(num_cpus=n_cpus_clustering, num_gpus=0):
                 clustering_metrics_futures = evalute_clustering.submit(
@@ -1003,13 +1058,20 @@ def main(
 
     save_combined.submit(consistedness_df, clustering_df, results_folder).result()
 
+    # --- PATHSINGLE BENCHMARK ---
+    adata = load_kang_data_ps.submit(data_path, debug).result()
+    adata_proc, n_clusters, true_labels = preprocess_data_ps.submit(adata).result()
+    output_path = apply_magic_and_calc_activity.submit(adata_proc).result()
+    activity_df = postprocess_activity_matrix.submit(output_path).result()
+    save_results_ps.submit(activity_df, true_labels, n_clusters, results_folder).result()
+
     time.sleep(2)
 
 
 if __name__ == "__main__":
     import argparse
 
-    parser = argparse.ArgumentParser(description="Run the IVAE Benchmark Workflow.")
+    parser = argparse.ArgumentParser(description="Run the IVAE and PathSIngle Benchmark Workflow.")
 
     parser.add_argument(
         "--debug",
@@ -1028,7 +1090,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--data_path",
         type=str,
-        default="results/data",
+        default="data",
         help="Path to the folder containing or to download input data.",
     )
 
