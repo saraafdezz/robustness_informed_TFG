@@ -98,6 +98,19 @@ def run_pathsingle(adata):
     return output_activity
 
 if __name__ == '__main__':
+
+    # Kang data
+    adata = sc.read_h5ad("data/kang_counts_25k.h5ad")
+    adata = sc.pp.subsample(adata, fraction=0.05, copy=True)  # Reduce para pruebas (ELIMINAR PARA EL LAUNCH FINAL)
+    adata.obs['labels'] = adata.obs['cell_type'].astype("category").cat.codes  # convierte a enteros
+    true_labels = adata.obs['labels']
+    n_clusters = adata.obs['labels'].nunique()
+    sc.pp.normalize_total(adata)
+    sc.pp.sqrt(adata)
+    adata.raw = adata.copy()
+
+
+    '''
     # 68K PBMC data.
     adata = sc.datasets.pbmc68k_reduced()
     adata.obs['labels'] = adata.obs.bulk_labels.map({'CD14+ Monocyte':0, 'Dendritic':1, 'CD56+ NK':2, 'CD4+/CD25 T Reg':3, 'CD19+ B':4, 'CD8+ Cytotoxic T':5, 'CD4+/CD45RO+ Memory':6, 'CD8+/CD45RA+ Naive Cytotoxic':7, 'CD4+/CD45RA+/CD25- Naive T':8, 'CD34+':9})
@@ -105,7 +118,7 @@ if __name__ == '__main__':
     true_labels = adata.obs.labels
     print(adata)
 
-    '''
+    
     # T-cells data.
     num_splits = 5
     split_files = [f'./data/sc_training_split_{i+1}.h5ad' for i in range(num_splits)]
