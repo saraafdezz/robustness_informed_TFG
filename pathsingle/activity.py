@@ -2,7 +2,7 @@ import pandas as pd
 import numpy as np
 from concurrent.futures import ProcessPoolExecutor, as_completed
 import os
-from metrics import choose_scaling_method
+from pathsingle.metrics import choose_scaling_method
 
 
 #Function to determine if an interaction type is inhibitory.

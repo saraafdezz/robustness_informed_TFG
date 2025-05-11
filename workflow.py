@@ -976,7 +976,7 @@ def compute_pathsingle_consistency(embedding_dfs):
 
 # Flow
 @flow(
-    name="m-IVAE",
+    name="m-IVAE-PathSingle",
     task_runner=RayTaskRunner(
         init_kwargs={
             "log_to_driver": False,
@@ -1083,43 +1083,66 @@ def main(
             consistedness_futures = compute_consistedness.submit(results) # Calculating consistency
             consistedness.append(consistedness_futures)
 
+        wait(evals)
+        wait(clustering_metrics)
+        wait(consistedness)
+
         # ---PathSingle---
+        encodings_ps_futures = []
+        clustering_metrics_ps = []
+        consistedness_ps = []
         # For each result...
         for res in results:
             # Launching PathSingle on split test
-            encodings_ps = fit_model_pathsingle.submit(res)
+            x_train, x_val, x_test, obs_train, obs_val, obs_test = split_data(seed, data_path, ivae_config)
+            future = fit_model_pathsingle.submit(x_train, x_val, x_test, obs_train, obs_val, obs_test)
+            encodings_ps_futures.append((future, seed))  # Save both future and seed
 
+        # Ensure all embeddings are computed
+        wait([e[0] for e in encodings_ps_futures])
+
+        # Launching metrics for all completed encodings
+        for encodings_ps, seed in encodings_ps_futures:
             # Calculating clustering
-            clustering_ps = compute_pathsingle_clustering.submit(encodings_ps)
-            clustering_metrics.append(clustering_ps)
+            clustering_ps = compute_pathsingle_clustering.submit(encodings_ps, seed)
+            clustering_metrics_ps.append(clustering_ps)
 
             # Calculating consistency
-            consistency_ps = compute_pathsingle_consistency.submit([encodings_ps])
-            consistedness.append(consistency_ps)
+            consistency_ps = compute_pathsingle_consistency.submit(encodings_ps)
+            consistedness_ps.append(consistency_ps)
 
-        # Free some memory
-        del results
-        gc.collect() # Garbage collector
+        clustering_metrics.extend(clustering_metrics_ps)
+        consistedness.extend(consistedness_ps)
 
     # Wait for all tasks to finish
-    wait(clustering_metrics)
     wait(evals)
+    wait(clustering_metrics)
     wait(consistedness)
 
     # Saving metrics and results
     eval_df = build_eval_df.submit(evals)
     save_eval.submit(eval_df, results_folder).result()
 
-    clustering_df = build_clustering_df(clustering_metrics)
+    # Esperar y resolver clustering
+    wait(clustering_metrics)
+    clustering_results = [f.result() for f in clustering_metrics]
+    clustering_df = build_clustering_df.submit(clustering_results).result()
     save_clustering.submit(clustering_df, results_folder).result()
 
-    consistedness_df = build_consistedness_df(consistedness)
+    # Esperar y resolver consistency
+    wait(consistedness)
+    consistency_results = [f.result() for f in consistedness]
+    consistedness_df = build_consistedness_df.submit(consistency_results).result()
     save_consistedness.submit(consistedness_df, results_folder).result()
 
     save_combined.submit(consistedness_df, clustering_df, results_folder).result()
 
     # Waiting before finishing
     time.sleep(2)
+
+    # Free some memory
+    del results
+    gc.collect() # Garbage collector
 
 
 if __name__ == "__main__":
