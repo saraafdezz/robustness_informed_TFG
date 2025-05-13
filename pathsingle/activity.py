@@ -3,6 +3,7 @@ import numpy as np
 from concurrent.futures import ProcessPoolExecutor, as_completed
 import os
 from pathsingle.metrics import choose_scaling_method
+import traceback
 
 
 #Function to determine if an interaction type is inhibitory.
@@ -13,14 +14,21 @@ def is_inhibitory(interaction_type):
 def process_sample(args):
     """Process all pathways for a single sample"""
     sample_idx, sample_data, sample_name, pathway_interactions, gene_to_index, scaling_func = args
+    print(f"Processing sample {sample_idx}") # Debug
     pathway_activities = {}
     interaction_dict = {'sample_name': sample_name}
     
     # Process each pathway sequentially.
     for pathway, interactions in pathway_interactions.items():
-        pathway_activity, interaction_acts = process_pathway((pathway, interactions, sample_data, gene_to_index, scaling_func))
-        pathway_activities[pathway] = pathway_activity
-        interaction_dict.update(interaction_acts)
+        print(f"[{sample_idx}] Procesando pathway: {pathway}")  # Debug
+        try:
+            pathway_activity, interaction_acts = process_pathway((pathway, interactions, sample_data, gene_to_index, scaling_func))
+            pathway_activities[pathway] = pathway_activity
+            interaction_dict.update(interaction_acts)
+        except Exception as e:
+            print(f"Error en pathway {pathway} (sample {sample_idx}): {e}") # Debug
+            continue
+
     
     return sample_idx, pathway_activities, interaction_dict
 
@@ -107,17 +115,28 @@ def calc_activity(adata, sparsity=20):
         
         # Collect results maintaining order.
         for future in as_completed(futures):
-            idx, sample_pathway_activities, interaction_dict = future.result()
-            ordered_results[idx] = (sample_pathway_activities, interaction_dict)
-            print(f"Processed sample {idx+1}/{gene_expression_tensor.shape[0]}", end='\r')
+            try: # Debug
+                idx, sample_pathway_activities, interaction_dict = future.result()
+                ordered_results[idx] = (sample_pathway_activities, interaction_dict)
+                print(f"Processed sample {idx+1}/{gene_expression_tensor.shape[0]}", end='\r')
+            except Exception as e:
+                print(f"\n Error in future: {e}")
+                traceback.print_exc()
+    # Debug
+    for i, result in enumerate(ordered_results):
+        if result is None:
+            print(f"Result at index {i} is None.")
 
     # Process results in correct order.
+    print("Starting result aggregation...") # Debug
     for idx, (sample_pathway_activities, interaction_dict) in enumerate(ordered_results):
         # Store pathway activities.
         for pathway, activity in sample_pathway_activities.items():
             pathway_activities[pathway].append(activity)
         interaction_dicts.append(interaction_dict)
+    print("Aggregated results.") # Debug
 
+    print("Building mean activity matrix...") # Debug
     mean_activity_matrix = np.zeros((gene_expression_tensor.shape[0], len(pathway_interactions))) # (samples, pathways)
 
     for idx, (pathway_name, activities) in enumerate(pathway_activities.items()):
@@ -125,16 +144,25 @@ def calc_activity(adata, sparsity=20):
             mean_activity_matrix[:, idx] = activities
         else:
             print(f"No activities for pathway {pathway_name}")
+    print("Built mean activity matrix.") # Debug
+
+    # Paths
+    output_path = os.path.expanduser('~/TFG/PathSingle/pathsingle/data/output_activity.csv')
+    interaction_path = os.path.expanduser('~/TFG/PathSingle/pathsingle/data/output_interaction_activity.csv')
 
     #Create the DataFrame for the activity matrix.
     activity_df = pd.DataFrame(mean_activity_matrix, index=adata.obs_names, columns=list(pathway_interactions.keys())).T
 
     #Save results to CSV.
-    activity_df.T.to_csv('~/TFG/PathSingle/pathsingle/data/output_activity.csv')
+    print("Saving activity CSV...")
+    activity_df.T.to_csv(output_path)
+    print("Saved activity CSV.")
     
     # Convert the list of dictionaries to a DataFrame.
     interaction_activities = pd.DataFrame(interaction_dicts)
     # Set the sample name as the index.
     interaction_activities.set_index('sample_name', inplace=True)
     interaction_activities = interaction_activities.astype(np.float16)
-    interaction_activities.to_csv('~/TFG/PathSingle/pathsingle/data/output_interaction_activity.csv')
+    print("Saving interaction activity CSV...")
+    interaction_activities.to_csv(interaction_path)
+    print("Saved interaction activity CSV.")
