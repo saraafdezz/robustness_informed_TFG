@@ -1,6 +1,6 @@
 import pandas as pd
 import numpy as np
-from concurrent.futures import ProcessPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import os
 from pathsingle.metrics import choose_scaling_method
 import traceback
@@ -101,7 +101,7 @@ def calc_activity(adata, sparsity=20):
     scaling_func = choose_scaling_method(sparsity)
 
     # Process samples in parallel.
-    with ProcessPoolExecutor(max_workers=os.cpu_count()) as executor:
+    with ThreadPoolExecutor(max_workers=os.cpu_count()) as executor:
         # Prepare arguments for all samples
         sample_args = [(idx, 
                        gene_expression_tensor[idx], 
