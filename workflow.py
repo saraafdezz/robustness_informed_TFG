@@ -1068,6 +1068,7 @@ def main(
             frac = None
             model_ = model
         create_folders.submit(results_folder, model_, frac).result()
+        create_folders.submit(results_folder_ps, model_, frac).result()
         ivae_config = build_ivae_config.submit(model, genes).result() # Build IVAE config
 
         results = []
@@ -1140,8 +1141,15 @@ if __name__ == "__main__":
     parser.add_argument(
         "--results_folder",
         type=str,
-        default="results",
-        help="Path to the main folder where results will be saved.",
+        default="results/IVAE",
+        help="Path to the main folder where IVAE results will be saved.",
+    )
+
+    parser.add_argument(
+        "--results_folder_ps",
+        type=str,
+        default="results/PathSingle",
+        help="Path to the main folder where PathSingle results will be saved.",
     )
 
     parser.add_argument(
