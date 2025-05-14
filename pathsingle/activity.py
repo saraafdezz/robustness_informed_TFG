@@ -155,7 +155,7 @@ def calc_activity(adata, sparsity=20):
 
     #Save results to CSV.
     print("Saving activity CSV...")
-    activity_df.T.to_csv(output_path)
+    activity_df.to_csv(output_path) # Not transposing to keep cells in rows and pathway names in columns
     print("Saved activity CSV.")
     
     # Convert the list of dictionaries to a DataFrame.
@@ -166,3 +166,4 @@ def calc_activity(adata, sparsity=20):
     print("Saving interaction activity CSV...")
     interaction_activities.to_csv(interaction_path)
     print("Saved interaction activity CSV.")
+    

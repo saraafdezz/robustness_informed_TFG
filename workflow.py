@@ -3,11 +3,13 @@ import os
 import time
 from multiprocessing import cpu_count
 from pathlib import Path
+import argparse
 
 import numpy as np
 import pandas as pd
 import ray
 import scanpy as sc
+from types import SimpleNamespace
 from keras import callbacks
 from keras.models import Model
 from prefect import flow, get_run_logger, task
@@ -888,10 +890,9 @@ def save_combined(consistedness_df, clustering_df, output_path):
         bbox_inches="tight",
     )
 
-
-# Tasks for PathSingle
+# Task for PathSingle
 @task(cache_policy=TASK_SOURCE + INPUTS)
-def fit_model_pathsingle(x_train, x_val, x_test, obs_train, obs_val, obs_test, debug:bool):
+def fit_model_pathsingle(x_train, x_val, x_test, obs_train, obs_val, obs_test, seed: int, debug: bool):
     """
     Run PathSingle on split data, return annotated embeddings
     """
@@ -906,28 +907,35 @@ def fit_model_pathsingle(x_train, x_val, x_test, obs_train, obs_val, obs_test, d
     adata.obs.loc[x_val.index, 'split'] = 'val'
     adata.obs.loc[x_test.index, 'split'] = 'test'
 
-    # Run PathSingle activity inference
-    sparsity = calculate_sparsity(adata)
-
-    # MAGIC for less genes (testing)
-    if debug: 
-        adata = adata[:500,:2000,].copy()  # first 500 columns
-        # Remove unexpressed genes (columns with all zeros)
+    # MAGIC para reducir ruido
+    if debug:
+        adata = adata[:500, :2000].copy()
         nonzero_genes = np.array((adata.X != 0).sum(axis=0)).flatten() > 0
         adata = adata[:, nonzero_genes].copy()
 
-    sce.pp.magic(adata, name_list='all_genes') # solver approx (exact is too slow and non scalable, approx is faster and more efficient)
+    sce.pp.magic(adata, name_list='all_genes', solver='approximate', n_pca=30, knn=3)
+
+    # Run PathSingle
     print("Starting calc_activity...")
-    calc_activity(adata, sparsity)
+    calc_activity(adata)  # Guarda el resultado a CSV
     print("Finished calc_activity")
 
+    # Reading output_activity.csv
+    activity_path = os.path.expanduser('~/TFG/PathSingle/pathsingle/data/output_activity.csv')
+    activity = pd.read_csv(activity_path, index_col=0)
 
-    activity = pd.DataFrame(adata.obsm['activity'], index=adata.obs_names)
-    activity['split'] = adata.obs['split']
-    activity['cell_type'] = adata.obs['cell_type']
-    activity['condition'] = adata.obs['condition']
+    # Readjusting the df
+    activity.index.name = None
+    activity = activity.T  # Cada fila es una celula
+
+    activity['split'] = adata.obs.loc[activity.index, 'split'].values
+    activity['cell_type'] = adata.obs.loc[activity.index, 'cell_type'].values
+    activity['condition'] = adata.obs.loc[activity.index, 'condition'].values
     activity['model'] = 'pathsingle'
-    return activity
+    activity['seed'] = seed
+
+    return SimpleNamespace(eval=activity)
+
 
 @task(cache_policy=TASK_SOURCE + INPUTS)
 def compute_pathsingle_clustering(embedding_df, seed):
@@ -1059,8 +1067,11 @@ def main(
     # all_seeds = [x[1] for x in all_combinations]
 
     evals = []
+    # PathSingle no tiene MSE -> NO uso eval
     consistedness = []
     clustering_metrics = []
+    consistedness_ps = []
+    clustering_metrics_ps = []
 
     # For each model...
     for model in models:
@@ -1074,24 +1085,27 @@ def main(
         ivae_config = build_ivae_config.submit(model, genes).result() # Build IVAE config
 
         results = []
+        results_ps = []
+
 
         # For each seed...
         for seed in seeds:
             with remote_options(num_cpus=1, num_gpus=1):
                 result_future = fit_model_ivae.submit(ivae_config, seed, data_path, debug) # Train IVAE for that seed (and model)
                 x_train, x_val, x_test, obs_train, obs_val, obs_test = split_data(seed, data_path, ivae_config)
-                result_future_ps = fit_model_pathsingle(x_train, x_val, x_test, obs_train, obs_val, obs_test, debug)
+                result_future_ps = fit_model_pathsingle(x_train, x_val, x_test, obs_train, obs_val, obs_test, seed, debug)
 
             with remote_options(num_cpus=n_cpus_clustering, num_gpus=0):
                 clustering_metrics_futures = evalute_clustering.submit( # Clustering metrics for that seed and model (AMI)
                     result_future, seed
                 )
-                clustering_metrics_futures_ps = evalute_clustering.submit(result_future_ps, seed)
+                clustering_metrics_futures_ps = compute_pathsingle_clustering.submit(result_future_ps.eval, seed)
+                
 
             results.append(result_future)
-            results.append(result_future_ps)
+            results_ps.append(result_future_ps)
             clustering_metrics.append(clustering_metrics_futures)
-            clustering_metrics.append(clustering_metrics_futures_ps)
+            clustering_metrics_ps.append(clustering_metrics_futures_ps)
 
         # Waiting and saving results
         wait(results) 
@@ -1100,9 +1114,9 @@ def main(
             eval_futures = gather_evals.submit(results)
             evals.append(eval_futures)
             consistedness_futures = compute_consistedness.submit(results) # Calculating consistency
-            consistedness_futures_ps = compute_pathsingle_consistency.submit(result)
+            consistedness_futures_ps = compute_pathsingle_consistency.submit([r.result().eval for r in results_ps])
             consistedness.append(consistedness_futures)
-            consistedness.append(consistedness_futures_ps)
+            consistedness_ps.append(consistedness_futures_ps)
 
         del results # Free some memory
         gc.collect() # Garbage collection
@@ -1113,6 +1127,7 @@ def main(
     wait(consistedness)
 
     # Saving metrics and results
+    # IVAE
     eval_df = build_eval_df.submit(evals)
     save_eval.submit(eval_df, results_folder).result()
 
@@ -1124,13 +1139,23 @@ def main(
 
     save_combined.submit(consistedness_df, clustering_df, results_folder).result()
 
+    # PathSingle
+    evals_ps_resolved = [f.result() for f in results_ps]
+    clustering_metrics_ps_resolved = [f.result() for f in clustering_metrics_ps]
+    consistedness_ps_resolved = [f.result() for f in consistedness_ps]
+
+    clustering_df_ps = build_clustering_df(clustering_metrics_ps_resolved)
+    consistedness_df_ps = build_consistedness_df(consistedness_ps_resolved)
+
+    save_clustering.submit(clustering_df_ps, results_folder_ps).result()
+    save_consistedness.submit(consistedness_df_ps, results_folder_ps).result()
+    save_combined.submit(consistedness_df_ps, clustering_df_ps, results_folder_ps).result()
+
     # Waiting before finishing
     time.sleep(2)
 
 
 if __name__ == "__main__":
-    import argparse
-
     parser = argparse.ArgumentParser(description="Run the IVAE and PathSIngle Benchmark Workflow.")
 
     parser.add_argument(
