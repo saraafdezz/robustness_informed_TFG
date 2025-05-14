@@ -14,13 +14,13 @@ def is_inhibitory(interaction_type):
 def process_sample(args):
     """Process all pathways for a single sample"""
     sample_idx, sample_data, sample_name, pathway_interactions, gene_to_index, scaling_func = args
-    print(f"Processing sample {sample_idx}") # Debug
+    # print(f"Processing sample {sample_idx}") # Debug
     pathway_activities = {}
     interaction_dict = {'sample_name': sample_name}
     
     # Process each pathway sequentially.
     for pathway, interactions in pathway_interactions.items():
-        print(f"[{sample_idx}] Procesando pathway: {pathway}")  # Debug
+        # print(f"[{sample_idx}] Procesando pathway: {pathway}")  # Debug
         try:
             pathway_activity, interaction_acts = process_pathway((pathway, interactions, sample_data, gene_to_index, scaling_func))
             pathway_activities[pathway] = pathway_activity

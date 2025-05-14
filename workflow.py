@@ -916,7 +916,7 @@ def fit_model_pathsingle(x_train, x_val, x_test, obs_train, obs_val, obs_test, d
         nonzero_genes = np.array((adata.X != 0).sum(axis=0)).flatten() > 0
         adata = adata[:, nonzero_genes].copy()
 
-    sce.pp.magic(adata, name_list='all_genes', solver='approximate', n_pca=30, knn=3) # solver approx (exact is too slow and non scalable, approx is faster and more efficient)
+    sce.pp.magic(adata, name_list='all_genes') # solver approx (exact is too slow and non scalable, approx is faster and more efficient)
     print("Starting calc_activity...")
     calc_activity(adata, sparsity)
     print("Finished calc_activity")
