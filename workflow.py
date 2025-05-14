@@ -996,7 +996,8 @@ def compute_pathsingle_consistency(embedding_dfs):
     ),
 )
 def main(
-    results_folder: str = "results",
+    results_folder: str = "results/IVAE",
+    results_folder_ps: str = "results/PathSingle",
     data_path: str = "data",
     frac_start: float = 0.1,
     frac_step: float = 0.1,
@@ -1043,6 +1044,7 @@ def main(
             frac = None
             model_ = model
         create_folders.submit(results_folder, model_, frac)
+        create_folders.submit(results_folder_ps, model_, frac)
     wait(folders)
 
     # Download data
