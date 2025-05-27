@@ -181,6 +181,9 @@ def split_data(
     obs_test = obs.loc[x_test.index, :]
     obs_val = obs.loc[x_val.index, :]
 
+    print(obs_val['condition'].value_counts())
+    print(obs_test['condition'].value_counts())
+
     return x_train, x_val, x_test, obs_train, obs_val, obs_test
 
 
@@ -686,6 +689,7 @@ def save_eval(df, output_path):
 @task(cache_policy=TASK_SOURCE + INPUTS)
 def build_clustering_df(clustering_results):
     """Builds a dataframe with the evaluation metrics."""
+    print("DEBUG: build_clustering_df got metrics:", clustering_results)
     df = pd.concat(clustering_results, axis=0, ignore_index=True)
     df["metric"] = "AdjustedMutualInfo"
 
@@ -718,6 +722,9 @@ def save_clustering(df, output_path):
     metric_scores_to_plot["Model Layer"] = (
         metric_scores_to_plot["Model Layer"] + " " + metric_scores_to_plot["layer"]
     )
+
+    metric_scores_to_plot = metric_scores_to_plot.dropna(subset=["Score"])
+
     custom_params = {"axes.spines.right": False, "axes.spines.top": False}
     sns.set_theme(context="paper", font_scale=2, style="ticks", rc=custom_params)
     fac = 0.7
@@ -852,6 +859,8 @@ def save_combined(consistedness_df, clustering_df, output_path):
         columns={"score": "Score", "metric": "Metric"}
     )
 
+    scores_to_plot = scores_to_plot.dropna(subset=["Score"])
+
     custom_params = {"axes.spines.right": False, "axes.spines.top": False}
     sns.set_theme(context="paper", font_scale=2, style="ticks", rc=custom_params)
     fac = 0.7
@@ -909,11 +918,15 @@ def fit_model_pathsingle(x_train, x_val, x_test, obs_train, obs_val, obs_test, s
 
     # MAGIC para reducir ruido
     if debug:
-        adata = adata[:500, :2000].copy()
+        adata = adata[:500, ].copy()
         nonzero_genes = np.array((adata.X != 0).sum(axis=0)).flatten() > 0
         adata = adata[:, nonzero_genes].copy()
 
     sce.pp.magic(adata, name_list='all_genes', solver='approximate', n_pca=30, knn=3)
+
+    # DEBUG
+    if np.isnan(adata.X).any():
+       raise ValueError("NaNs found in adata.X after MAGIC - possible preprocessing issue.")
 
     # Run PathSingle
     print("Starting calc_activity...")
@@ -924,9 +937,21 @@ def fit_model_pathsingle(x_train, x_val, x_test, obs_train, obs_val, obs_test, s
     activity_path = os.path.expanduser('~/TFG/PathSingle/pathsingle/data/output_activity.csv')
     activity = pd.read_csv(activity_path, index_col=0)
 
+    # DEBUG
+    if activity.empty:
+        raise ValueError("Activity DataFrame is empty. PathSingle likely failed.")
+    missing = set(activity.columns) - set(adata.obs_names)
+    if missing:
+        raise ValueError(f"Activity file contains unknown cell IDs: {missing}")
+
     # Readjusting the df
     activity.index.name = None
     activity = activity.T  # Cada fila es una celula
+
+    # DEBUG
+    if activity.shape[0] != adata.shape[0]:
+       raise ValueError("Mismatch between activity and AnnData cells after transpose.")
+
 
     activity['split'] = adata.obs.loc[activity.index, 'split'].values
     activity['cell_type'] = adata.obs.loc[activity.index, 'cell_type'].values
@@ -934,36 +959,64 @@ def fit_model_pathsingle(x_train, x_val, x_test, obs_train, obs_val, obs_test, s
     activity['model'] = 'pathsingle'
     activity['seed'] = seed
 
+    print(f"[DEBUG] PathSingle finished with {activity.shape[0]} cells, {activity.shape[1]} features")
+    print(f"[DEBUG] Unique cell types: {activity['cell_type'].nunique()}")
+
     return SimpleNamespace(eval=activity)
 
 
 @task(cache_policy=TASK_SOURCE + INPUTS)
 def compute_pathsingle_clustering(embedding_df, seed):
-    """
-    Compute Adjusted Mutual Information (AMI) on PathSingle pathway scores
-    """
-    clust_scores = {}
+    clust_scores = {'PathSingle': {'train': [], 'val': [], 'test': []}}
     batch_size = 256 * os.cpu_count() + 1
-    clust_scores['PathSingle'] = {'train': [], 'val': [], 'test': []}
+
+    print("[DEBUG] Distribution of cell types per split/condition:")
+    print(embedding_df.groupby(['split', 'condition'])['cell_type'].value_counts())
+    print(embedding_df.groupby(['split', 'condition']).size())
+
+
+    # Filter control only once
+    embedding_df = embedding_df[embedding_df['condition'] == 'control']
+
+    # Fit on train
+    train_df = embedding_df[embedding_df['split'] == 'train']
+    if train_df.empty or train_df['cell_type'].nunique() < 2:
+        print("[ERROR] Cannot train model due to insufficient data in 'train'")
+        return pd.DataFrame()  # Return empty DataFrame to prevent crash
+
+    y_train = train_df['cell_type']
+    X_train = train_df.drop(columns=['split', 'cell_type', 'condition', 'model'])
+    model = MiniBatchKMeans(n_clusters=y_train.nunique(), batch_size=batch_size)
+    model.fit(X_train)
+
+    print("[DEBUG] Split counts:")
+    print(embedding_df['split'].value_counts())
+
+    print("[DEBUG] Unique cell types per split and condition:")
+    print(embedding_df.groupby(['split', 'condition'])['cell_type'].nunique())
 
     for split in ['train', 'val', 'test']:
         df = embedding_df[embedding_df['split'] == split]
-        df = df[df['condition'] == 'control']
+        if df.empty or df['cell_type'].nunique() < 2:
+            print(f"[WARN] Skipping {split} due to insufficient data")
+            continue
 
         y_true = df['cell_type']
         X = df.drop(columns=['split', 'cell_type', 'condition', 'model'])
 
-        model = MiniBatchKMeans(n_clusters=y_true.nunique(), batch_size=batch_size)
-        model.fit(X)
         preds = model.labels_ if split == 'train' else model.predict(X)
-
         score = adjusted_mutual_info_score(y_true, preds)
         clust_scores['PathSingle'][split].append(score)
 
-    df = pd.DataFrame.from_dict(clust_scores).melt(var_name='layer', value_name='score', ignore_index=False).reset_index(names=['split']).explode('score')
-    df['score'] = df['score'].astype(float)
+    df = pd.DataFrame.from_dict(clust_scores).melt(
+        var_name='layer', value_name='score', ignore_index=False
+    ).reset_index(names=['split']).explode('score')
+
+    df['score'] = pd.to_numeric(df['score'], errors='coerce')
     df['model'] = 'pathsingle'
     return df
+
+
 
 @task(cache_policy=TASK_SOURCE + INPUTS)
 def compute_pathsingle_consistency(embedding_dfs):
@@ -972,6 +1025,12 @@ def compute_pathsingle_consistency(embedding_dfs):
     """
     scores = {'PathSingle': {'train': [], 'val': [], 'test': []}}
     drop_cols = ['split', 'cell_type', 'condition', 'model']
+
+    print("[DEBUG] Split counts:")
+    print(embedding_df['split'].value_counts())
+
+    print("[DEBUG] Unique cell types per split and condition:")
+    print(embedding_df.groupby(['split', 'condition'])['cell_type'].nunique())
 
     for split in ['train', 'val', 'test']:
         importances = []
@@ -1114,7 +1173,7 @@ def main(
             eval_futures = gather_evals.submit(results)
             evals.append(eval_futures)
             consistedness_futures = compute_consistedness.submit(results) # Calculating consistency
-            consistedness_futures_ps = compute_pathsingle_consistency.submit([r.result().eval for r in results_ps])
+            consistedness_futures_ps = compute_pathsingle_consistency.submit([r.eval for r in results_ps])
             consistedness.append(consistedness_futures)
             consistedness_ps.append(consistedness_futures_ps)
 
@@ -1140,11 +1199,15 @@ def main(
     save_combined.submit(consistedness_df, clustering_df, results_folder).result()
 
     # PathSingle
-    evals_ps_resolved = [f.result() for f in results_ps]
+    evals_ps_resolved = [f for f in results_ps]
     clustering_metrics_ps_resolved = [f.result() for f in clustering_metrics_ps]
     consistedness_ps_resolved = [f.result() for f in consistedness_ps]
 
+    print("DEBUG: clustering_metrics_ps_resolved =", clustering_metrics_ps_resolved)
+    print("DEBUG: types =", [type(m) for m in clustering_metrics_ps_resolved])
+
     clustering_df_ps = build_clustering_df(clustering_metrics_ps_resolved)
+    print("DEBUG: clustering_df_ps =", clustering_df_ps)
     consistedness_df_ps = build_consistedness_df(consistedness_ps_resolved)
 
     save_clustering.submit(clustering_df_ps, results_folder_ps).result()
