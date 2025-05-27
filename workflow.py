@@ -930,11 +930,12 @@ def fit_model_pathsingle(x_train, x_val, x_test, obs_train, obs_val, obs_test, s
 
     # Run PathSingle
     print("Starting calc_activity...")
-    calc_activity(adata)  # Guarda el resultado a CSV
+    activity_path = os.path.expanduser(f'~/TFG/PathSingle/pathsingle/data/output_activity_{seed}.csv')
+    interaction_path = os.path.expanduser(f'~/TFG/PathSingle/pathsingle/data/output_interaction_activity_{seed}.csv')
+    calc_activity(adata, output_path=activity_path, interaction_path=interaction_path)  # Guarda el resultado a CSV
     print("Finished calc_activity")
 
     # Reading output_activity.csv
-    activity_path = os.path.expanduser('~/TFG/PathSingle/pathsingle/data/output_activity.csv')
     activity = pd.read_csv(activity_path, index_col=0)
 
     # DEBUG

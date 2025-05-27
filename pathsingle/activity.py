@@ -66,7 +66,7 @@ def process_pathway(args):
     
     return pathway_activity / max(1,interactions_counter), interaction_activities
 
-def calc_activity(adata, sparsity=20):
+def calc_activity(adata, sparsity=20, output_path="./activity.csv", interaction_path="./interaction_activity.csv"):
     """Calculate the activity of pathways based on gene expression data."""
     #Load gene expression data.
     gene_expression_tensor = adata.X #gene_expression_df.values (samples, genes)
@@ -146,9 +146,6 @@ def calc_activity(adata, sparsity=20):
             print(f"No activities for pathway {pathway_name}")
     print("Built mean activity matrix.") # Debug
 
-    # Paths
-    output_path = os.path.expanduser('~/TFG/PathSingle/pathsingle/data/output_activity.csv')
-    interaction_path = os.path.expanduser('~/TFG/PathSingle/pathsingle/data/output_interaction_activity.csv')
 
     #Create the DataFrame for the activity matrix.
     activity_df = pd.DataFrame(mean_activity_matrix, index=adata.obs_names, columns=list(pathway_interactions.keys())).T
