@@ -918,7 +918,7 @@ def fit_model_pathsingle(x_train, x_val, x_test, obs_train, obs_val, obs_test, s
 
     # MAGIC para reducir ruido
     if debug:
-        adata = adata[:500, ].copy()
+        adata = adata.subsample(n_obs=500, random_state=0, copy=True)
         nonzero_genes = np.array((adata.X != 0).sum(axis=0)).flatten() > 0
         adata = adata[:, nonzero_genes].copy()
 
@@ -1231,14 +1231,14 @@ if __name__ == "__main__":
     parser.add_argument(
         "--results_folder",
         type=str,
-        default="results/IVAE",
+        default="debug/results/IVAE",
         help="Path to the main folder where IVAE results will be saved.",
     )
 
     parser.add_argument(
         "--results_folder_ps",
         type=str,
-        default="results/PathSingle",
+        default="debug/results/PathSingle",
         help="Path to the main folder where PathSingle results will be saved.",
     )
 
