@@ -922,7 +922,7 @@ def fit_model_pathsingle(x_train, x_val, x_test, obs_train, obs_val, obs_test, s
         nonzero_genes = np.array((adata.X != 0).sum(axis=0)).flatten() > 0
         adata = adata[:, nonzero_genes].copy()
 
-    sce.pp.magic(adata, name_list='all_genes', solver='approximate', n_pca=30, knn=3)
+    sce.pp.magic(adata, name_list='all_genes', solver='approximate', n_pca=30, knn=3, random_state=seed)
 
     # DEBUG
     if np.isnan(adata.X).any():
