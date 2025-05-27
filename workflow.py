@@ -1027,15 +1027,15 @@ def compute_pathsingle_consistency(embedding_dfs):
     scores = {'PathSingle': {'train': [], 'val': [], 'test': []}}
     drop_cols = ['split', 'cell_type', 'condition', 'model']
 
-    print("[DEBUG] Split counts:")
-    print(embedding_df['split'].value_counts())
-
-    print("[DEBUG] Unique cell types per split and condition:")
-    print(embedding_df.groupby(['split', 'condition'])['cell_type'].nunique())
 
     for split in ['train', 'val', 'test']:
         importances = []
         for df in embedding_dfs:
+            print("[DEBUG] Split counts:")
+            print(df['split'].value_counts())
+
+            print("[DEBUG] Unique cell types per split and condition:")
+            print(df.groupby(['split', 'condition'])['cell_type'].nunique())
             subset = df[df['split'] == split].drop(columns=drop_cols, errors='ignore')
             if subset.empty:
                 continue
