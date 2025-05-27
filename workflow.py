@@ -918,7 +918,7 @@ def fit_model_pathsingle(x_train, x_val, x_test, obs_train, obs_val, obs_test, s
 
     # MAGIC para reducir ruido
     if debug:
-        adata = adata.subsample(n_obs=500, random_state=0, copy=True)
+        adata = sc.pp.subsample(adata, n_obs=500, random_state=0, copy=True)
         nonzero_genes = np.array((adata.X != 0).sum(axis=0)).flatten() > 0
         adata = adata[:, nonzero_genes].copy()
 
