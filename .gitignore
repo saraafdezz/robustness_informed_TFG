@@ -174,3 +174,4 @@ notebooks/debug.ipynb
 
 .snakemake/
 .ruff_cache/
+!pathsingle/data/pathway_relations.csv
