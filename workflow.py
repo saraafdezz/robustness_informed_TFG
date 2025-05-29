@@ -1,15 +1,16 @@
+import argparse
 import gc
 import os
 import time
 from multiprocessing import cpu_count
 from pathlib import Path
-import argparse
+from types import SimpleNamespace
 
 import numpy as np
 import pandas as pd
 import ray
 import scanpy as sc
-from types import SimpleNamespace
+import scanpy.external as sce
 from keras import callbacks
 from keras.models import Model
 from prefect import flow, get_run_logger, task
@@ -21,9 +22,7 @@ from prefect_shell import ShellOperation
 from scipy.stats import weightedtau
 from sklearn.cluster import MiniBatchKMeans
 from sklearn.metrics.cluster import adjusted_mutual_info_score
-from sklearn.preprocessing import (minmax_scale, Normalizer)
-from sklearn.decomposition import PCA
-import scanpy.external as sce
+from sklearn.preprocessing import minmax_scale
 
 from ivae.bio import (
     InformedModelConfig,
@@ -38,8 +37,6 @@ from ivae.datasets import load_kang
 from ivae.models import (
     InformedVAE,
 )
-
-from pathsingle.metrics import calculate_sparsity
 from pathsingle.activity import calc_activity
 
 
@@ -181,8 +178,8 @@ def split_data(
     obs_test = obs.loc[x_test.index, :]
     obs_val = obs.loc[x_val.index, :]
 
-    print(obs_val['condition'].value_counts())
-    print(obs_test['condition'].value_counts())
+    print(obs_val["condition"].value_counts())
+    print(obs_test["condition"].value_counts())
 
     return x_train, x_val, x_test, obs_train, obs_val, obs_test
 
@@ -899,9 +896,20 @@ def save_combined(consistedness_df, clustering_df, output_path):
         bbox_inches="tight",
     )
 
+
 # Task for PathSingle
 @task(cache_policy=TASK_SOURCE + INPUTS)
-def fit_model_pathsingle(x_train, x_val, x_test, obs_train, obs_val, obs_test, seed: int, debug: bool, results_folder_ps="."):
+def fit_model_pathsingle(
+    x_train,
+    x_val,
+    x_test,
+    obs_train,
+    obs_val,
+    obs_test,
+    seed: int,
+    debug: bool,
+    results_folder_ps=".",
+):
     """
     Run PathSingle on split data, return annotated embeddings
     """
@@ -913,9 +921,9 @@ def fit_model_pathsingle(x_train, x_val, x_test, obs_train, obs_val, obs_test, s
     # Preprocessing
     adata.obs_names = x.index
     adata.var_names = x.columns
-    adata.obs['split'] = 'train'
-    adata.obs.loc[x_val.index, 'split'] = 'val'
-    adata.obs.loc[x_test.index, 'split'] = 'test'
+    adata.obs["split"] = "train"
+    adata.obs.loc[x_val.index, "split"] = "val"
+    adata.obs.loc[x_test.index, "split"] = "test"
 
     # MAGIC para reducir ruido
     if debug:
@@ -923,18 +931,31 @@ def fit_model_pathsingle(x_train, x_val, x_test, obs_train, obs_val, obs_test, s
         nonzero_genes = np.array((adata.X != 0).sum(axis=0)).flatten() > 0
         adata = adata[:, nonzero_genes].copy()
 
-    sce.pp.magic(adata, name_list='all_genes', solver='approximate', n_pca=30, knn=3, random_state=seed)
+    sce.pp.magic(
+        adata,
+        name_list="all_genes",
+        solver="approximate",
+        n_pca=30,
+        knn=3,
+        random_state=seed,
+    )
 
     # DEBUG
     if np.isnan(adata.X).any():
-       raise ValueError("NaNs found in adata.X after MAGIC - possible preprocessing issue.")
+        raise ValueError(
+            "NaNs found in adata.X after MAGIC - possible preprocessing issue."
+        )
 
     # Run PathSingle
     print("Starting calc_activity...")
-    
-    activity_path = results_folder_ps.joinpath(f'output_activity_{seed}.csv')
-    interaction_path = results_folder_ps.joinpath(f'output_interaction_activity_{seed}.csv')
-    calc_activity(adata, output_path=activity_path, interaction_path=interaction_path)  # Guarda el resultado a CSV
+
+    activity_path = results_folder_ps.joinpath(f"output_activity_{seed}.csv")
+    interaction_path = results_folder_ps.joinpath(
+        f"output_interaction_activity_{seed}.csv"
+    )
+    calc_activity(
+        adata, output_path=activity_path, interaction_path=interaction_path
+    )  # Guarda el resultado a CSV
     print("Finished calc_activity")
 
     # Reading output_activity.csv
@@ -953,16 +974,17 @@ def fit_model_pathsingle(x_train, x_val, x_test, obs_train, obs_val, obs_test, s
 
     # DEBUG
     if activity.shape[0] != adata.shape[0]:
-       raise ValueError("Mismatch between activity and AnnData cells after transpose.")
+        raise ValueError("Mismatch between activity and AnnData cells after transpose.")
 
+    activity["split"] = adata.obs.loc[activity.index, "split"].values
+    activity["cell_type"] = adata.obs.loc[activity.index, "cell_type"].values
+    activity["condition"] = adata.obs.loc[activity.index, "condition"].values
+    activity["model"] = "pathsingle"
+    activity["seed"] = seed
 
-    activity['split'] = adata.obs.loc[activity.index, 'split'].values
-    activity['cell_type'] = adata.obs.loc[activity.index, 'cell_type'].values
-    activity['condition'] = adata.obs.loc[activity.index, 'condition'].values
-    activity['model'] = 'pathsingle'
-    activity['seed'] = seed
-
-    print(f"[DEBUG] PathSingle finished with {activity.shape[0]} cells, {activity.shape[1]} features")
+    print(
+        f"[DEBUG] PathSingle finished with {activity.shape[0]} cells, {activity.shape[1]} features"
+    )
     print(f"[DEBUG] Unique cell types: {activity['cell_type'].nunique()}")
 
     return SimpleNamespace(eval=activity)
@@ -970,55 +992,56 @@ def fit_model_pathsingle(x_train, x_val, x_test, obs_train, obs_val, obs_test, s
 
 @task(cache_policy=TASK_SOURCE + INPUTS)
 def compute_pathsingle_clustering(embedding_df, seed):
-    clust_scores = {'PathSingle': {'train': [], 'val': [], 'test': []}}
+    clust_scores = {"PathSingle": {"train": [], "val": [], "test": []}}
     batch_size = 256 * os.cpu_count() + 1
 
     print("[DEBUG] Distribution of cell types per split/condition:")
-    print(embedding_df.groupby(['split', 'condition'])['cell_type'].value_counts())
-    print(embedding_df.groupby(['split', 'condition']).size())
-
+    print(embedding_df.groupby(["split", "condition"])["cell_type"].value_counts())
+    print(embedding_df.groupby(["split", "condition"]).size())
 
     # Filter control only once
-    embedding_df = embedding_df[embedding_df['condition'] == 'control']
+    embedding_df = embedding_df[embedding_df["condition"] == "control"]
 
     # Fit on train
-    train_df = embedding_df[embedding_df['split'] == 'train']
-    if train_df.empty or train_df['cell_type'].nunique() < 2:
+    train_df = embedding_df[embedding_df["split"] == "train"]
+    if train_df.empty or train_df["cell_type"].nunique() < 2:
         print("[ERROR] Cannot train model due to insufficient data in 'train'")
         return pd.DataFrame()  # Return empty DataFrame to prevent crash
 
-    y_train = train_df['cell_type']
-    X_train = train_df.drop(columns=['split', 'cell_type', 'condition', 'model'])
+    y_train = train_df["cell_type"]
+    X_train = train_df.drop(columns=["split", "cell_type", "condition", "model"])
     model = MiniBatchKMeans(n_clusters=y_train.nunique(), batch_size=batch_size)
     model.fit(X_train)
 
     print("[DEBUG] Split counts:")
-    print(embedding_df['split'].value_counts())
+    print(embedding_df["split"].value_counts())
 
     print("[DEBUG] Unique cell types per split and condition:")
-    print(embedding_df.groupby(['split', 'condition'])['cell_type'].nunique())
+    print(embedding_df.groupby(["split", "condition"])["cell_type"].nunique())
 
-    for split in ['train', 'val', 'test']:
-        df = embedding_df[embedding_df['split'] == split]
-        if df.empty or df['cell_type'].nunique() < 2:
+    for split in ["train", "val", "test"]:
+        df = embedding_df[embedding_df["split"] == split]
+        if df.empty or df["cell_type"].nunique() < 2:
             print(f"[WARN] Skipping {split} due to insufficient data")
             continue
 
-        y_true = df['cell_type']
-        X = df.drop(columns=['split', 'cell_type', 'condition', 'model'])
+        y_true = df["cell_type"]
+        X = df.drop(columns=["split", "cell_type", "condition", "model"])
 
-        preds = model.labels_ if split == 'train' else model.predict(X)
+        preds = model.labels_ if split == "train" else model.predict(X)
         score = adjusted_mutual_info_score(y_true, preds)
-        clust_scores['PathSingle'][split].append(score)
+        clust_scores["PathSingle"][split].append(score)
 
-    df = pd.DataFrame.from_dict(clust_scores).melt(
-        var_name='layer', value_name='score', ignore_index=False
-    ).reset_index(names=['split']).explode('score')
+    df = (
+        pd.DataFrame.from_dict(clust_scores)
+        .melt(var_name="layer", value_name="score", ignore_index=False)
+        .reset_index(names=["split"])
+        .explode("score")
+    )
 
-    df['score'] = pd.to_numeric(df['score'], errors='coerce')
-    df['model'] = 'pathsingle'
+    df["score"] = pd.to_numeric(df["score"], errors="coerce")
+    df["model"] = "pathsingle"
     return df
-
 
 
 @task(cache_policy=TASK_SOURCE + INPUTS)
@@ -1026,19 +1049,18 @@ def compute_pathsingle_consistency(embedding_dfs):
     """
     Compute pairwise weighted tau consistency for PathSingle across seeds
     """
-    scores = {'PathSingle': {'train': [], 'val': [], 'test': []}}
-    drop_cols = ['split', 'cell_type', 'condition', 'model']
+    scores = {"PathSingle": {"train": [], "val": [], "test": []}}
+    drop_cols = ["split", "cell_type", "condition", "model"]
 
-
-    for split in ['train', 'val', 'test']:
+    for split in ["train", "val", "test"]:
         importances = []
         for df in embedding_dfs:
             print("[DEBUG] Split counts:")
-            print(df['split'].value_counts())
+            print(df["split"].value_counts())
 
             print("[DEBUG] Unique cell types per split and condition:")
-            print(df.groupby(['split', 'condition'])['cell_type'].nunique())
-            subset = df[df['split'] == split].drop(columns=drop_cols, errors='ignore')
+            print(df.groupby(["split", "condition"])["cell_type"].nunique())
+            subset = df[df["split"] == split].drop(columns=drop_cols, errors="ignore")
             if subset.empty:
                 continue
             imp = get_importances(subset, abs=True)
@@ -1048,12 +1070,18 @@ def compute_pathsingle_consistency(embedding_dfs):
         for i in range(len(importances)):
             for j in range(i + 1, len(importances)):
                 tau, _ = weightedtau(importances[i], importances[j])
-                scores['PathSingle'][split].append(tau)
+                scores["PathSingle"][split].append(tau)
 
-    df = pd.DataFrame.from_dict(scores).melt(var_name='layer', value_name='score', ignore_index=False).reset_index(names=['split']).explode('score')
-    df['score'] = df['score'].astype(float)
-    df['model'] = 'pathsingle'
+    df = (
+        pd.DataFrame.from_dict(scores)
+        .melt(var_name="layer", value_name="score", ignore_index=False)
+        .reset_index(names=["split"])
+        .explode("score")
+    )
+    df["score"] = df["score"].astype(float)
+    df["model"] = "pathsingle"
     return df
+
 
 # Flow
 @flow(
@@ -1144,25 +1172,41 @@ def main(
             model_ = model
         create_folders.submit(results_folder, model_, frac).result()
         create_folders.submit(results_folder_ps, model_, frac).result()
-        ivae_config = build_ivae_config.submit(model, genes).result() # Build IVAE config
+        ivae_config = build_ivae_config.submit(
+            model, genes
+        ).result()  # Build IVAE config
 
         results = []
         results_ps = []
 
-
         # For each seed...
         for seed in seeds:
             with remote_options(num_cpus=1, num_gpus=1):
-                result_future = fit_model_ivae.submit(ivae_config, seed, data_path, debug) # Train IVAE for that seed (and model)
-                x_train, x_val, x_test, obs_train, obs_val, obs_test = split_data(seed, data_path, ivae_config)
-                result_future_ps = fit_model_pathsingle(x_train, x_val, x_test, obs_train, obs_val, obs_test, seed, debug, results_folder_ps)
+                result_future = fit_model_ivae.submit(
+                    ivae_config, seed, data_path, debug
+                )  # Train IVAE for that seed (and model)
+                x_train, x_val, x_test, obs_train, obs_val, obs_test = split_data(
+                    seed, data_path, ivae_config
+                )
+                result_future_ps = fit_model_pathsingle(
+                    x_train,
+                    x_val,
+                    x_test,
+                    obs_train,
+                    obs_val,
+                    obs_test,
+                    seed,
+                    debug,
+                    results_folder_ps,
+                )
 
             with remote_options(num_cpus=n_cpus_clustering, num_gpus=0):
-                clustering_metrics_futures = evalute_clustering.submit( # Clustering metrics for that seed and model (AMI)
+                clustering_metrics_futures = evalute_clustering.submit(  # Clustering metrics for that seed and model (AMI)
                     result_future, seed
                 )
-                clustering_metrics_futures_ps = compute_pathsingle_clustering.submit(result_future_ps.eval, seed)
-                
+                clustering_metrics_futures_ps = compute_pathsingle_clustering.submit(
+                    result_future_ps.eval, seed
+                )
 
             results.append(result_future)
             results_ps.append(result_future_ps)
@@ -1170,18 +1214,22 @@ def main(
             clustering_metrics_ps.append(clustering_metrics_futures_ps)
 
         # Waiting and saving results
-        wait(results) 
+        wait(results)
 
         with remote_options(num_cpus=1, num_gpus=0):
             eval_futures = gather_evals.submit(results)
             evals.append(eval_futures)
-            consistedness_futures = compute_consistedness.submit(results) # Calculating consistency
-            consistedness_futures_ps = compute_pathsingle_consistency.submit([r.eval for r in results_ps])
+            consistedness_futures = compute_consistedness.submit(
+                results
+            )  # Calculating consistency
+            consistedness_futures_ps = compute_pathsingle_consistency.submit(
+                [r.eval for r in results_ps]
+            )
             consistedness.append(consistedness_futures)
             consistedness_ps.append(consistedness_futures_ps)
 
-        del results # Free some memory
-        gc.collect() # Garbage collection
+        del results  # Free some memory
+        gc.collect()  # Garbage collection
 
     # Wait for all tasks to finish
     wait(clustering_metrics)
@@ -1215,14 +1263,18 @@ def main(
 
     save_clustering.submit(clustering_df_ps, results_folder_ps).result()
     save_consistedness.submit(consistedness_df_ps, results_folder_ps).result()
-    save_combined.submit(consistedness_df_ps, clustering_df_ps, results_folder_ps).result()
+    save_combined.submit(
+        consistedness_df_ps, clustering_df_ps, results_folder_ps
+    ).result()
 
     # Waiting before finishing
     time.sleep(2)
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Run the IVAE and PathSIngle Benchmark Workflow.")
+    parser = argparse.ArgumentParser(
+        description="Run the IVAE and PathSIngle Benchmark Workflow."
+    )
 
     parser.add_argument(
         "--debug",
