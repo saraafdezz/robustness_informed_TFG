@@ -901,10 +901,11 @@ def save_combined(consistedness_df, clustering_df, output_path):
 
 # Task for PathSingle
 @task(cache_policy=TASK_SOURCE + INPUTS)
-def fit_model_pathsingle(x_train, x_val, x_test, obs_train, obs_val, obs_test, seed: int, debug: bool):
+def fit_model_pathsingle(x_train, x_val, x_test, obs_train, obs_val, obs_test, seed: int, debug: bool, results_folder_ps="."):
     """
     Run PathSingle on split data, return annotated embeddings
     """
+    results_folder_ps = Path(results_folder_ps)
     x = pd.concat([x_train, x_val, x_test])
     obs = pd.concat([obs_train, obs_val, obs_test])
     adata = sc.AnnData(X=x.values, obs=obs.copy(), var=pd.DataFrame(index=x.columns))
@@ -930,8 +931,9 @@ def fit_model_pathsingle(x_train, x_val, x_test, obs_train, obs_val, obs_test, s
 
     # Run PathSingle
     print("Starting calc_activity...")
-    activity_path = os.path.expanduser(f'~/TFG/PathSingle/pathsingle/data/output_activity_{seed}.csv')
-    interaction_path = os.path.expanduser(f'~/TFG/PathSingle/pathsingle/data/output_interaction_activity_{seed}.csv')
+    
+    activity_path = results_folder_ps.joinpath(f'output_activity_{seed}.csv')
+    interaction_path = results_folder_ps.joinpath(f'output_interaction_activity_{seed}.csv')
     calc_activity(adata, output_path=activity_path, interaction_path=interaction_path)  # Guarda el resultado a CSV
     print("Finished calc_activity")
 
@@ -1153,7 +1155,7 @@ def main(
             with remote_options(num_cpus=1, num_gpus=1):
                 result_future = fit_model_ivae.submit(ivae_config, seed, data_path, debug) # Train IVAE for that seed (and model)
                 x_train, x_val, x_test, obs_train, obs_val, obs_test = split_data(seed, data_path, ivae_config)
-                result_future_ps = fit_model_pathsingle(x_train, x_val, x_test, obs_train, obs_val, obs_test, seed, debug)
+                result_future_ps = fit_model_pathsingle(x_train, x_val, x_test, obs_train, obs_val, obs_test, seed, debug, results_folder_ps)
 
             with remote_options(num_cpus=n_cpus_clustering, num_gpus=0):
                 clustering_metrics_futures = evalute_clustering.submit( # Clustering metrics for that seed and model (AMI)
@@ -1232,14 +1234,14 @@ if __name__ == "__main__":
     parser.add_argument(
         "--results_folder",
         type=str,
-        default="debug/results/IVAE",
+        default="results/debug/IVAE",
         help="Path to the main folder where IVAE results will be saved.",
     )
 
     parser.add_argument(
         "--results_folder_ps",
         type=str,
-        default="debug/results/PathSingle",
+        default="results/debug/PathSingle",
         help="Path to the main folder where PathSingle results will be saved.",
     )
 

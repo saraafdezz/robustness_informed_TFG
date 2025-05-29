@@ -4,6 +4,8 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 import os
 from pathsingle.metrics import choose_scaling_method
 import traceback
+from importlib import resources as impresources
+import pathsingle
 
 
 #Function to determine if an interaction type is inhibitory.
@@ -76,7 +78,8 @@ def calc_activity(adata, sparsity=20, output_path="./activity.csv", interaction_
     gene_to_index = {gene: i for i, gene in enumerate(gene_names)}
 
     #Load and parse pathway relations.
-    pathway_relations = pd.read_csv('~/TFG/PathSingle/pathsingle/data/pathway_relations.csv')
+    inp_file = impresources.files(pathsingle) / "data" / 'pathway_relations.csv'
+    pathway_relations = pd.read_csv(inp_file, sep=",")
     pathway_relations['source'] = pathway_relations['source'].fillna('').astype(str).str.lower().str.split('*')
     pathway_relations['target'] = pathway_relations['target'].fillna('').astype(str).str.lower().str.split('*')
 
