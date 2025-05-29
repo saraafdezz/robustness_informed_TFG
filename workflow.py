@@ -1299,6 +1299,7 @@ if __name__ == "__main__":
     main(
         debug=args.debug,
         results_folder=args.results_folder,
+        results_folder_ps=args.results_folder_ps,
         data_path=args.data_path,
         n_seeds=args.n_seeds,
         frac_start=args.frac_start,
