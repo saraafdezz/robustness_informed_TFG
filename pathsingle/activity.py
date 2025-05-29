@@ -78,8 +78,13 @@ def calc_activity(adata, sparsity=20, output_path="./activity.csv", interaction_
     gene_to_index = {gene: i for i, gene in enumerate(gene_names)}
 
     #Load and parse pathway relations.
-    inp_file = impresources.files(pathsingle) / "data" / 'pathway_relations.csv'
-    pathway_relations = pd.read_csv(inp_file, sep=",")
+    inp_file = impresources.files(pathsingle) / "pathway_db" / "reactome" / 'pathway_relations.zip'
+    #inp_file = impresources.files(pathsingle) / "data" / 'pathway_relations.csv'
+    renamer = {"PATHWAY_NAMES" : "pathway",	"INTERACTION_TYPE": "interactiontype",	"PARTICIPANT_A": "source",	"PARTICIPANT_B": "target"}
+    #pathway_relations = pd.read_csv(inp_file, sep=",")
+    pathway_relations = pd.read_csv(inp_file, sep="\t")
+    pathway_relations = pathway_relations.rename(columns=renamer)
+
     pathway_relations['source'] = pathway_relations['source'].fillna('').astype(str).str.lower().str.split('*')
     pathway_relations['target'] = pathway_relations['target'].fillna('').astype(str).str.lower().str.split('*')
 
