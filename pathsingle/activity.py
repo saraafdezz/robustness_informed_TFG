@@ -91,6 +91,7 @@ def process_pathway(args):
 
 def calc_activity(
     adata,
+    n_jobs=-1,
     sparsity=20,
     output_path="./activity.csv",
     interaction_path="./interaction_activity.csv",
@@ -151,7 +152,7 @@ def calc_activity(
     scaling_func = choose_scaling_method(sparsity)
 
     # Process samples in parallel.
-    with ThreadPoolExecutor(max_workers=os.cpu_count()) as executor:
+    with ThreadPoolExecutor(max_workers=n_jobs) as executor:
         # Prepare arguments for all samples
         sample_args = [
             (
@@ -230,3 +231,4 @@ def calc_activity(
     print("Saving interaction activity CSV...")
     interaction_activities.to_csv(interaction_path)
     print("Saved interaction activity CSV.")
+
