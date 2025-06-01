@@ -185,14 +185,14 @@ def train_val_test_split(features, val_size, test_size, stratify, seed):
 
 @dataclass
 class InformedModelConfig:
-    model_kind: str
-    frac: float
-    n_encoding_layers: int
-    adj_name: list
-    adj_activ: list
-    input_genes: list
-    layer_entity_names: list
-    model_layer: list
+    model_kind: str = ""
+    frac: float = 0.0
+    n_encoding_layers: int = 1
+    adj_name: list = None
+    adj_activ: list = None
+    input_genes: list = None
+    layer_entity_names: list = None
+    model_layer: list = None
 
 
 def build_model_config(genes, model_kind, frac=None):
