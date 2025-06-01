@@ -31,6 +31,7 @@ from ivae.bio import (
     build_model_config,
     get_activations,
     get_importances,
+    get_reactome_adj,
     train_val_test_split,
 )
 from ivae.datasets import load_kang
@@ -38,6 +39,8 @@ from ivae.models import (
     InformedVAE,
 )
 from pathsingle.activity import calc_activity
+
+N_CPUS = os.cpu_count()
 
 
 # IVAE
@@ -695,6 +698,7 @@ def build_clustering_df(clustering_results):
 
 @task(cache_policy=TASK_SOURCE + INPUTS)
 def save_clustering(df, output_path):
+    print("*"*20, df.columns)
     import seaborn as sns
 
     fname = "clustering"
@@ -900,25 +904,30 @@ def save_combined(consistedness_df, clustering_df, output_path):
 # Task for PathSingle
 @task(cache_policy=TASK_SOURCE + INPUTS)
 def fit_model_pathsingle(
-    x_train,
-    x_val,
-    x_test,
-    obs_train,
-    obs_val,
-    obs_test,
+    model_config,
     seed: int,
+    data_path,
     debug: bool,
     results_folder_ps=".",
+    n_jobs=-1,
 ):
     """
     Run PathSingle on split data, return annotated embeddings
     """
     results_folder_ps = Path(results_folder_ps)
-    x = pd.concat([x_train, x_val, x_test])
-    obs = pd.concat([obs_train, obs_val, obs_test])
-    adata = sc.AnnData(X=x.values, obs=obs.copy(), var=pd.DataFrame(index=x.columns))
+    x_train, x_val, x_test, obs_train, obs_val, obs_test = split_data(
+        seed, data_path, model_config
+    )
 
-    # Preprocessing
+    x_train = x_train.sample(n=100, random_state=seed)
+    x_val = x_val.sample(n=100, random_state=seed)
+    obs_train = obs_train.loc[x_train.index]
+    obs_val = obs_val.loc[x_val.index]
+
+    x = pd.concat((x_train, x_val, x_test), axis=0)
+    obs = pd.concat((obs_train, obs_val, obs_test), axis=0)
+
+    adata = sc.AnnData(X=x, obs=obs)
     adata.obs_names = x.index
     adata.var_names = x.columns
     adata.obs["split"] = "train"
@@ -928,8 +937,8 @@ def fit_model_pathsingle(
     # MAGIC para reducir ruido
     if debug:
         adata = sc.pp.subsample(adata, n_obs=500, random_state=0, copy=True)
-        nonzero_genes = np.array((adata.X != 0).sum(axis=0)).flatten() > 0
-        adata = adata[:, nonzero_genes].copy()
+    nonzero_genes = np.array((adata.X != 0).sum(axis=0)).flatten() > 0
+    adata = adata[:, nonzero_genes].copy()
 
     sce.pp.magic(
         adata,
@@ -938,6 +947,7 @@ def fit_model_pathsingle(
         n_pca=30,
         knn=3,
         random_state=seed,
+        n_jobs=n_jobs
     )
 
     # DEBUG
@@ -954,7 +964,7 @@ def fit_model_pathsingle(
         f"output_interaction_activity_{seed}.csv"
     )
     calc_activity(
-        adata, output_path=activity_path, interaction_path=interaction_path
+        adata, n_jobs=n_jobs, output_path=activity_path, interaction_path=interaction_path
     )  # Guarda el resultado a CSV
     print("Finished calc_activity")
 
@@ -991,7 +1001,10 @@ def fit_model_pathsingle(
 
 
 @task(cache_policy=TASK_SOURCE + INPUTS)
-def compute_pathsingle_clustering(embedding_df, seed):
+def compute_pathsingle_clustering(pathsingle_namespace, seed):
+
+    embedding_df = pathsingle_namespace.eval
+
     clust_scores = {"PathSingle": {"train": [], "val": [], "test": []}}
     batch_size = 256 * os.cpu_count() + 1
 
@@ -1041,20 +1054,23 @@ def compute_pathsingle_clustering(embedding_df, seed):
 
     df["score"] = pd.to_numeric(df["score"], errors="coerce")
     df["model"] = "pathsingle"
+
     return df
 
 
 @task(cache_policy=TASK_SOURCE + INPUTS)
-def compute_pathsingle_consistency(embedding_dfs):
+def compute_pathsingle_consistency(pathsingle_namespace_lst):
     """
     Compute pairwise weighted tau consistency for PathSingle across seeds
     """
+
     scores = {"PathSingle": {"train": [], "val": [], "test": []}}
     drop_cols = ["split", "cell_type", "condition", "model"]
 
     for split in ["train", "val", "test"]:
         importances = []
-        for df in embedding_dfs:
+        for ns in pathsingle_namespace_lst:
+            df = ns.eval
             print("[DEBUG] Split counts:")
             print(df["split"].value_counts())
 
@@ -1119,9 +1135,6 @@ def main(
     fracsAux = np.arange(frac_start, frac_stop + frac_step / 2, frac_step)
     fracs = [f"{x:.2f}" for x in fracsAux]
 
-    if debug:
-        n_seeds = 3
-
     seeds = list(range(n_seeds))
 
     # Models for training
@@ -1130,6 +1143,7 @@ def main(
     # Use n_cpu and n_gpu arguments
     # Ensure at least 1 CPU
     n_cpus_clustering = max(1, n_cpu - 2 * n_gpu if n_gpu > 0 else n_cpu - 1)
+    n_cpus_clustering = max(1, n_cpu//3)
 
     # Installation and folders preparation
     install_ivae.submit().result()
@@ -1150,6 +1164,14 @@ def main(
     data_path = data_path_future.result()
     genes_future = get_genes.submit(data_path)
     genes = genes_future.result()
+
+    ps_model_config = InformedModelConfig(
+            model_kind= "pathsingle",
+            frac = None,
+            n_encoding_layers = 1,
+            adj_name = ["Reactome"],
+            input_genes = get_reactome_adj().index.intersection(genes).unique().to_list()
+        )
     # ivae_config_futures = build_ivae_config.map(models, unmapped(genes))
 
     # all_combinations = list(itertools.product(ivae_config_futures, seeds))
@@ -1185,19 +1207,16 @@ def main(
                 result_future = fit_model_ivae.submit(
                     ivae_config, seed, data_path, debug
                 )  # Train IVAE for that seed (and model)
-                x_train, x_val, x_test, obs_train, obs_val, obs_test = split_data(
-                    seed, data_path, ivae_config
-                )
-                result_future_ps = fit_model_pathsingle(
-                    x_train,
-                    x_val,
-                    x_test,
-                    obs_train,
-                    obs_val,
-                    obs_test,
+
+            with remote_options(num_cpus=n_cpus_clustering, num_gpus=0):
+
+                result_future_ps = fit_model_pathsingle.submit(
+                    ps_model_config,
                     seed,
+                    data_path,
                     debug,
                     results_folder_ps,
+                    n_jobs=n_cpus_clustering,
                 )
 
             with remote_options(num_cpus=n_cpus_clustering, num_gpus=0):
@@ -1205,7 +1224,7 @@ def main(
                     result_future, seed
                 )
                 clustering_metrics_futures_ps = compute_pathsingle_clustering.submit(
-                    result_future_ps.eval, seed
+                    result_future_ps, seed
                 )
 
             results.append(result_future)
@@ -1215,6 +1234,7 @@ def main(
 
         # Waiting and saving results
         wait(results)
+        wait(results_ps)
 
         with remote_options(num_cpus=1, num_gpus=0):
             eval_futures = gather_evals.submit(results)
@@ -1223,18 +1243,21 @@ def main(
                 results
             )  # Calculating consistency
             consistedness_futures_ps = compute_pathsingle_consistency.submit(
-                [r.eval for r in results_ps]
+                results_ps
             )
             consistedness.append(consistedness_futures)
             consistedness_ps.append(consistedness_futures_ps)
 
         del results  # Free some memory
+        del results_ps
         gc.collect()  # Garbage collection
 
     # Wait for all tasks to finish
     wait(clustering_metrics)
     wait(evals)
     wait(consistedness)
+    wait(consistedness_ps)
+    wait(clustering_metrics_ps)
 
     # Saving metrics and results
     # IVAE
@@ -1250,16 +1273,16 @@ def main(
     save_combined.submit(consistedness_df, clustering_df, results_folder).result()
 
     # PathSingle
-    evals_ps_resolved = [f for f in results_ps]
-    clustering_metrics_ps_resolved = [f.result() for f in clustering_metrics_ps]
-    consistedness_ps_resolved = [f.result() for f in consistedness_ps]
+    #evals_ps_resolved = [f for f in results_ps]
+    #clustering_metrics_ps_resolved = [f.result() for f in clustering_metrics_ps]
+    #consistedness_ps_resolved = [f.result() for f in consistedness_ps]
 
-    print("DEBUG: clustering_metrics_ps_resolved =", clustering_metrics_ps_resolved)
-    print("DEBUG: types =", [type(m) for m in clustering_metrics_ps_resolved])
+    #print("DEBUG: clustering_metrics_ps_resolved =", clustering_metrics_ps_resolved)
+    #print("DEBUG: types =", [type(m) for m in clustering_metrics_ps_resolved])
 
-    clustering_df_ps = build_clustering_df(clustering_metrics_ps_resolved)
-    print("DEBUG: clustering_df_ps =", clustering_df_ps)
-    consistedness_df_ps = build_consistedness_df(consistedness_ps_resolved)
+    clustering_df_ps = build_clustering_df(clustering_metrics_ps)
+    #print("DEBUG: clustering_df_ps =", clustering_df_ps)
+    consistedness_df_ps = build_consistedness_df(consistedness_ps)
 
     save_clustering.submit(clustering_df_ps, results_folder_ps).result()
     save_consistedness.submit(consistedness_df_ps, results_folder_ps).result()
@@ -1307,7 +1330,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--n_seeds",
         type=int,
-        default=100,
+        default=40,
         help="Number of repeated holdout procedures.",
     )
 
@@ -1342,7 +1365,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--n_cpus",
         type=int,
-        default=4,
+        default=N_CPUS,
         help="Max number of CPUs used for no  GPU tasks.",
     )
 
