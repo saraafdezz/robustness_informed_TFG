@@ -94,7 +94,7 @@ def calc_activity(
     n_jobs=-1,
     sparsity=20,
     output_path="./activity.csv",
-    interaction_path="./interaction_activity.csv",
+    interaction_path=None,
 ):
     """Calculate the activity of pathways based on gene expression data."""
     # Load gene expression data.
@@ -223,12 +223,13 @@ def calc_activity(
     )  # Not transposing to keep cells in rows and pathway names in columns
     print("Saved activity CSV.")
 
-    # Convert the list of dictionaries to a DataFrame.
-    interaction_activities = pd.DataFrame(interaction_dicts)
-    # Set the sample name as the index.
-    interaction_activities.set_index("sample_name", inplace=True)
-    interaction_activities = interaction_activities.astype(np.float16)
-    print("Saving interaction activity CSV...")
-    interaction_activities.to_csv(interaction_path)
-    print("Saved interaction activity CSV.")
+    if interaction_path is not None:
+        # Convert the list of dictionaries to a DataFrame.
+        interaction_activities = pd.DataFrame(interaction_dicts)
+        # Set the sample name as the index.
+        interaction_activities.set_index("sample_name", inplace=True)
+        interaction_activities = interaction_activities.astype(np.float16)
+        print("Saving interaction activity CSV...")
+        interaction_activities.to_csv(interaction_path)
+        print("Saved interaction activity CSV.")
 
