@@ -1,0 +1,16 @@
+# Set more detailed logging while developing
+[logging]
+level = "DEBUG"
+
+# Set the default storage for all flows
+[storage]
+# Use the local file system for storage
+type = "local"
+# Use the local file system for storage
+
+[tasks]
+default_persist_result = true
+
+[results]
+persist_by_default = true
+local_storage_path = "results/prefect"

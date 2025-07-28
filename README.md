@@ -10,21 +10,23 @@ Install `miniforge`
 The `.env` file used:
 
 ```
-IVAE_ENV_FOLDER=./.venvs/ivae
-BINN_ENV_FOLDER=./.venvs/binn
+RESULTS_FOLDER=/home/cloucera/mnt/output/isrobust/results
+PREFECT_LOCAL_STORAGE_PATH=/home/cloucera/mnt/output/isrobust/prefect
+DATA_PATH = os.getenv("DATA_PATH", "data")  # add data path
+
 N_GPU=3
-FRAC_START=0.1
+N_CPU=30
+FRAC_START=0.05
 FRAC_STOP=0.9
-FRAC_STEP=0.1
+FRAC_STEP=0.05
 SEED_START=0
 SEED_STOP=99
 SEED_STEP=1
 DEBUG=0
+
 ```
 
 It was run using:
 ```
-screen -dmS ivae
-make
-(reattach)
+screen -d -m make
 ```
