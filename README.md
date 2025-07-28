@@ -1,4 +1,4 @@
-# Robustness-Informed TFG
+# Robustness-Informed
 
 This repository contains the code for a project that investigates the use of pathway-informed Variational Autoencoders (VAEs) for analyzing single-cell RNA-sequencing data. The project compares the performance of VAEs informed by biological pathways (KEGG and Reactome) against VAEs with random connections and the PathSingle method.
 
