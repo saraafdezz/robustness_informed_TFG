@@ -1,8 +1,16 @@
-# Robustness-Informed
+# Robustness-Informed TFG
 
 This repository contains the code for a project that investigates the use of pathway-informed Variational Autoencoders (VAEs) for analyzing single-cell RNA-sequencing data. The project compares the performance of VAEs informed by biological pathways (KEGG and Reactome) against VAEs with random connections and the PathSingle method.
 
-The project goes along the paper "A Framework for Evaluating the Stability of Learned Representations in Biologically-Constrained Models in Single-Cell". To support fair, consistent, and reproducible experimentation, a modular and automated pipeline was developed using Pixi dependency manager, Prefect workflow manager and Ray computational distributed framework.
+The project goes along the paper "A Framework for Evaluating the Stability of Learned Representations in Biologically-Constrained Models in Single-Cell". To support fair, consistent, and reproducible experimentation, a modular and automated pipeline was developed using Pixi, Prefect, and Ray.
+
+## Workflow
+
+The following image shows the workflow of the project:
+
+![Workflow](assets/workflow.png)
+
+Note that, although the workflow is presented conceptually as a series of nested loops, the execution is managed asynchronously. Prefect submits tasks for all models and seeds to the Ray engine, which dynamically schedules them to optimize the use of available resources across the entire experiment, rather than processing each model configuration sequentially. The iVAE parts should be read as "for each iVAE model config".
 
 ## Project Overview
 
@@ -57,3 +65,4 @@ pixi run python workflow.py [OPTIONS]
 *   `prefect.toml`: The Prefect configuration file.
 *   `data/`: The directory where the input data is stored.
 *   `results/`: The directory where the results of the experiments are saved.
+*   `assets/`: The directory where the assets of the project are stored.
