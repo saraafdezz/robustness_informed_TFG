@@ -32,7 +32,7 @@ pixi install
 The main workflow is defined in `workflow.py` and can be executed using the following command:
 
 ```bash
-python workflow.py [OPTIONS]
+pixi run python workflow.py [OPTIONS]
 ```
 
 ### Arguments
